@@ -6,6 +6,11 @@
   const THEME_KEY = "meu-atlas-theme-v1";
   const ACCESS_KEY = "meu-atlas-access-v1";
   const LOGO = "./assets/meu-logo-albastru.png";
+  const SUPABASE_URL = "https://rwrrtgnsslyquyjaakwb.supabase.co";
+  const SUPABASE_ANON_KEY =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3cnJ0Z25zc2x5cXV5amFha3diIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjU2NTQsImV4cCI6MjA5NDcwMTY1NH0.a0uoOHkcIhyezaQWhl7obSd5lKoBWuFVtQLMiw-TYgo";
+  const USERNAME_DOMAIN = "meu-atlas.local";
+  const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   const defaultAccounts = [
     { username: "admin.meu", password: "Atlas2026!", name: "Admin MEU", role: "Admin", memberId: "MEM-0005", scope: "Toate departamentele" },
@@ -158,6 +163,8 @@
 
     return {
       members,
+      currentAccount: null,
+      remoteReady: false,
       tasks: [
         task("TASK-0001", "Finalizare model pontaj pentru voluntari", "Configurare câmpuri, validări și activități standard pentru raportarea orelor.", "Resurse Umane", "MEM-0011", "În lucru", "Ridicată", offsetDate(3), false, "", ""),
         task("TASK-0002", "Confirmare program acces locații", "Obținere confirmare pentru orele de acces și persoanele de contact pe locații.", "Logistică", "MEM-0008", "În așteptare", "Critică", offsetDate(1), true, "Lipsește confirmarea finală de la contactul locației.", ""),
@@ -346,6 +353,8 @@
       ...data,
       accounts: Array.isArray(data.accounts) && data.accounts.length ? data.accounts : fresh.accounts,
       roles: Array.isArray(data.roles) && data.roles.length > 2 ? data.roles : fresh.roles,
+      currentAccount: data.currentAccount || null,
+      remoteReady: Boolean(data.remoteReady),
     };
   }
 
@@ -375,7 +384,13 @@
 
   function activeAccount() {
     const session = getSession();
+    if (session?.account) return session.account;
+    if (state.currentAccount && state.currentAccount.username === session?.username) return state.currentAccount;
     return state.accounts.find((account) => account.username === session?.username) || null;
+  }
+
+  function usernameToEmail(username) {
+    return `${String(username || "").trim().toLowerCase()}@${USERNAME_DOMAIN}`;
   }
 
   function canAccessRoute(routeId) {
@@ -598,6 +613,201 @@
 
   function memberName(id) {
     return state.members.find((memberItem) => memberItem.id === id)?.name || "Nealocat";
+  }
+
+  function normalizeMember(row) {
+    return {
+      id: row.id,
+      name: row.name,
+      email: row.email || "",
+      department: row.department,
+      role: row.primary_role,
+      manager: row.manager || "",
+      accessLevel: row.access_level || "Membru",
+      safePerson: Boolean(row.safe_person),
+      status: row.status || "Activ",
+      addedAt: row.created_at || "",
+    };
+  }
+
+  function normalizeRoleAssignment(row) {
+    return {
+      id: row.id,
+      department: row.department,
+      role: row.title,
+      memberId: row.member_id || "",
+      assignedTo: row.member_id ? memberName(row.member_id) : "",
+      safePerson: Boolean(row.safe_person),
+      status: row.status || "Ocupat",
+    };
+  }
+
+  function normalizeTask(row) {
+    return {
+      id: row.id,
+      title: row.title,
+      description: row.description || "",
+      department: row.department,
+      ownerId: row.owner_id || "",
+      collaborators: [],
+      status: row.status,
+      priority: row.priority,
+      deadline: row.deadline || "",
+      blocker: Boolean(row.blocker),
+      blockerText: row.blocker_text || "",
+      evidenceUrl: row.evidence_url || "",
+      relatedLogId: row.related_log_id || "",
+      createdAt: row.created_at || "",
+      updatedAt: row.updated_at || "",
+    };
+  }
+
+  function normalizeLog(row) {
+    return {
+      id: row.id,
+      submittedBy: row.submitted_by || "",
+      department: row.department,
+      type: row.type,
+      title: row.title,
+      narrative: row.narrative,
+      relatedTaskId: row.related_task_id || "",
+      needsFollowUp: Boolean(row.needs_follow_up),
+      followUpOwnerId: row.follow_up_owner_id || "",
+      deadline: row.deadline || "",
+      urgency: row.urgency,
+      evidenceUrl: row.evidence_url || "",
+      convertToTask: false,
+      visibility: row.visibility,
+      status: row.status,
+      submittedAt: row.created_at || "",
+    };
+  }
+
+  function normalizeTimeEntry(row) {
+    return {
+      id: row.id,
+      memberId: row.member_id || "",
+      date: row.work_date,
+      department: row.department,
+      activity: row.activity,
+      relatedTaskId: row.related_task_id || "",
+      relatedLogId: row.related_log_id || "",
+      hours: Number(row.hours || 0),
+      notes: row.notes || "",
+      validationStatus: row.validation_status,
+      validatedBy: row.validated_by || "",
+      createdAt: row.created_at || "",
+    };
+  }
+
+  function normalizeRisk(row) {
+    return {
+      id: row.id,
+      category: row.category,
+      description: row.description,
+      severity: row.severity,
+      ownerId: row.owner_id || "",
+      mitigation: row.mitigation || "",
+      visibility: row.visibility,
+      status: row.status,
+      createdAt: row.created_at || "",
+    };
+  }
+
+  function normalizeFile(row) {
+    return {
+      id: row.id,
+      uploadedBy: row.uploaded_by || "",
+      relatedType: row.related_type,
+      relatedId: row.related_id,
+      title: row.title,
+      fileType: row.file_type,
+      driveUrl: row.drive_url,
+      uploadedAt: row.created_at || "",
+    };
+  }
+
+  async function fetchSupabaseTable(table, mapper, fallback) {
+    const { data, error } = await supabaseClient.from(table).select("*");
+    if (error) {
+      console.warn(`Nu am putut încărca ${table}.`, error);
+      return fallback;
+    }
+    return Array.isArray(data) ? data.map(mapper) : fallback;
+  }
+
+  async function loadRemoteData() {
+    if (!supabaseClient) return;
+    const members = await fetchSupabaseTable("members", normalizeMember, state.members);
+    state.members = members;
+    state.roles = await fetchSupabaseTable("role_assignments", normalizeRoleAssignment, state.roles);
+    state.tasks = await fetchSupabaseTable("tasks", normalizeTask, state.tasks);
+    state.logs = await fetchSupabaseTable("operational_logs", normalizeLog, state.logs);
+    state.timeEntries = await fetchSupabaseTable("time_entries", normalizeTimeEntry, state.timeEntries);
+    state.risks = await fetchSupabaseTable("risks", normalizeRisk, state.risks);
+    state.files = await fetchSupabaseTable("files", normalizeFile, state.files);
+    state.remoteReady = true;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  async function loadProfileForUser(user) {
+    const { data, error } = await supabaseClient.from("profiles").select("*").eq("id", user.id).single();
+    if (error || !data) {
+      throw new Error("Contul există în Auth, dar nu are profil MEU Atlas în tabelul profiles.");
+    }
+    return {
+      username: data.username,
+      password: "",
+      name: data.display_name,
+      role: data.role,
+      memberId: data.member_id || "",
+      scope: data.department_scope,
+      status: data.status || "Activ",
+    };
+  }
+
+  async function loginWithSupabase(username, password) {
+    if (!supabaseClient) throw new Error("Supabase nu este încărcat.");
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+      email: usernameToEmail(username),
+      password,
+    });
+    if (error) throw error;
+    const account = await loadProfileForUser(data.user);
+    if (account.status === "Suspendat") {
+      await supabaseClient.auth.signOut();
+      throw new Error("Contul este suspendat.");
+    }
+    state.currentAccount = account;
+    await loadRemoteData();
+    saveState("Autentificare Supabase");
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ username: account.username, account, loggedAt: new Date().toISOString() }));
+    return account;
+  }
+
+  async function restoreSupabaseSession() {
+    if (!supabaseClient || activeAccount()) return;
+    const { data } = await supabaseClient.auth.getSession();
+    if (!data.session?.user) return;
+    try {
+      const account = await loadProfileForUser(data.session.user);
+      state.currentAccount = account;
+      await loadRemoteData();
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({ username: account.username, account, loggedAt: new Date().toISOString() }));
+      render();
+    } catch (error) {
+      console.warn(error);
+    }
+  }
+
+  async function createAccountRemote(payload) {
+    if (!supabaseClient) throw new Error("Supabase nu este încărcat.");
+    const { data, error } = await supabaseClient.functions.invoke("create-account", {
+      body: payload,
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    return data;
   }
 
   function memberInitials(idOrName) {
@@ -2110,7 +2320,7 @@
       </form>
     `);
 
-    document.getElementById("accountForm").addEventListener("submit", (event) => {
+    document.getElementById("accountForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const username = data.get("username").trim();
@@ -2118,13 +2328,24 @@
         toast("Username existent", "Alege un username diferit.");
         return;
       }
-      state.accounts.push({
+      const payload = {
         username,
         password: data.get("password"),
         name: data.get("name").trim(),
         role: data.get("role"),
         memberId: data.get("memberId"),
         scope: data.get("scope"),
+      };
+      try {
+        if (activeAccount()?.role === "Admin") {
+          await createAccountRemote(payload);
+        }
+      } catch (error) {
+        console.warn(error);
+        toast("Cont local creat", "Funcția live nu este încă publicată; contul rămâne local în prototip.");
+      }
+      state.accounts.push({
+        ...payload,
         status: "Activ",
       });
       saveState("Cont creat");
@@ -2417,24 +2638,33 @@
     }
   });
 
-  loginForm.addEventListener("submit", (event) => {
+  loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const data = new FormData(loginForm);
     const username = String(data.get("username") || "").trim();
     const password = String(data.get("password") || "");
-    const account = state.accounts.find((item) => item.username === username && item.password === password && item.status !== "Suspendat");
-    if (!account) {
-      toast("Autentificare respinsă", "Username sau parolă incorectă.");
-      return;
+    let account;
+    try {
+      account = await loginWithSupabase(username, password);
+    } catch (error) {
+      console.warn(error);
+      account = state.accounts.find((item) => item.username === username && item.password === password && item.status !== "Suspendat");
+      if (!account) {
+        toast("Autentificare respinsă", error.message || "Username sau parolă incorectă.");
+        return;
+      }
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({ username: account.username, account, loggedAt: new Date().toISOString() }));
     }
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ username: account.username, loggedAt: new Date().toISOString() }));
     location.hash = firstAllowedRoute();
     render();
     toast("Bine ai venit", `${account.name} are acces ${account.role}.`);
   });
 
-  document.getElementById("logoutButton").addEventListener("click", () => {
+  document.getElementById("logoutButton").addEventListener("click", async () => {
+    if (supabaseClient) await supabaseClient.auth.signOut();
     sessionStorage.removeItem(SESSION_KEY);
+    state.currentAccount = null;
+    saveState("Ieșire din cont");
     closeModal();
     render();
   });
@@ -2462,4 +2692,5 @@
   applyTheme(initialTheme());
   applyAccessSettings();
   render();
+  restoreSupabaseSession();
 })();

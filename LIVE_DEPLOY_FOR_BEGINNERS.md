@@ -109,19 +109,28 @@ Atentie: `anon public key` poate sta in frontend. `service_role key` NU se pune 
 
 ## Partea C - Conectam codul la Supabase
 
-Aici nu trebuie sa faci singur codul. Imi dai:
+Am facut deja conexiunea in cod pentru proiectul tau Supabase:
 
-1. linkul GitHub Pages;
-2. Supabase Project URL;
-3. Supabase anon public key.
+- Project URL: `https://rwrrtgnsslyquyjaakwb.supabase.co`
+- GitHub Pages: `https://meutm.github.io/atlas/`
 
-Eu modific aplicatia ca:
+Acum trebuie doar sa urci fisierele actualizate pe GitHub Pages.
 
-1. login-ul sa intre prin Supabase;
-2. task-urile sa se salveze in Supabase;
-3. logurile sa se salveze in Supabase;
-4. pontajul sa se salveze in Supabase;
-5. conturile create din Admin sa fie conturi reale.
+Incarca in repo:
+
+- `index.html`
+- `styles.css`
+- `app.js`
+- folderul `assets`
+
+Dupa upload, intri pe:
+
+`https://meutm.github.io/atlas/`
+
+Login-ul va folosi Supabase:
+
+- username: `admin.meu`
+- parola: parola userului `admin.meu@meu-atlas.local` din Supabase Auth
 
 ## Partea D - Contul Admin initial
 
@@ -173,6 +182,17 @@ Pe scurt:
 5. Edge Function creeaza profilul in `profiles`.
 
 Nu punem cheia secreta in browser. Niciodata.
+
+Fisierul functiei este deja pregatit aici:
+
+`supabase/functions/create-account/index.ts`
+
+Ca sa o publici, ai doua variante:
+
+1. imi spui si o facem impreuna din calculatorul tau cu Supabase CLI;
+2. o punem mai tarziu, dupa ce verificam login-ul si citirea datelor.
+
+Pana atunci, butonul Creeaza cont ramane disponibil in UI, dar pentru conturi reale recomand sa nu-l folosesti live pana nu publicam functia.
 
 ## Partea F - Ce imi trimiti mie dupa ce faci GitHub + Supabase
 
