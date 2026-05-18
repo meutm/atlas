@@ -727,6 +727,18 @@
     };
   }
 
+  function normalizeProfile(row) {
+    return {
+      username: row.username,
+      password: "",
+      name: row.display_name,
+      role: row.role,
+      memberId: row.member_id || "",
+      scope: row.department_scope || "",
+      status: row.status || "Activ",
+    };
+  }
+
   async function fetchSupabaseTable(table, mapper, fallback) {
     const { data, error } = await supabaseClient.from(table).select("*");
     if (error) {
@@ -746,6 +758,7 @@
     state.timeEntries = await fetchSupabaseTable("time_entries", normalizeTimeEntry, state.timeEntries);
     state.risks = await fetchSupabaseTable("risks", normalizeRisk, state.risks);
     state.files = await fetchSupabaseTable("files", normalizeFile, state.files);
+    state.accounts = await fetchSupabaseTable("profiles", normalizeProfile, state.accounts);
     state.remoteReady = true;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
@@ -808,6 +821,124 @@
     if (error) throw error;
     if (data?.error) throw new Error(data.error);
     return data;
+  }
+
+  function toTaskRow(taskItem) {
+    return {
+      id: taskItem.id,
+      title: taskItem.title,
+      description: taskItem.description || "",
+      department: taskItem.department,
+      owner_id: taskItem.ownerId || null,
+      status: taskItem.status,
+      priority: taskItem.priority,
+      deadline: taskItem.deadline || null,
+      blocker: Boolean(taskItem.blocker),
+      blocker_text: taskItem.blockerText || "",
+      evidence_url: taskItem.evidenceUrl || "",
+      related_log_id: taskItem.relatedLogId || null,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  function toLogRow(logItem) {
+    return {
+      id: logItem.id,
+      submitted_by: logItem.submittedBy || null,
+      department: logItem.department,
+      type: logItem.type,
+      title: logItem.title,
+      narrative: logItem.narrative,
+      related_task_id: logItem.relatedTaskId || null,
+      needs_follow_up: Boolean(logItem.needsFollowUp),
+      follow_up_owner_id: logItem.followUpOwnerId || null,
+      deadline: logItem.deadline || null,
+      urgency: logItem.urgency,
+      evidence_url: logItem.evidenceUrl || "",
+      visibility: logItem.visibility,
+      status: logItem.status,
+    };
+  }
+
+  function toTimeEntryRow(entry) {
+    return {
+      id: entry.id,
+      member_id: entry.memberId || null,
+      work_date: entry.date,
+      department: entry.department,
+      activity: entry.activity,
+      related_task_id: entry.relatedTaskId || null,
+      related_log_id: entry.relatedLogId || null,
+      hours: Number(entry.hours || 0),
+      notes: entry.notes || "",
+      validation_status: entry.validationStatus,
+      validated_by: entry.validatedBy || null,
+    };
+  }
+
+  function toMemberRow(memberItem) {
+    return {
+      id: memberItem.id,
+      name: memberItem.name,
+      email: memberItem.email || "",
+      department: memberItem.department,
+      primary_role: memberItem.role,
+      manager: memberItem.manager || null,
+      access_level: memberItem.accessLevel,
+      safe_person: Boolean(memberItem.safePerson),
+      status: memberItem.status,
+    };
+  }
+
+  function toRiskRow(riskItem) {
+    return {
+      id: riskItem.id,
+      category: riskItem.category,
+      description: riskItem.description,
+      severity: riskItem.severity,
+      owner_id: riskItem.ownerId || null,
+      mitigation: riskItem.mitigation || "",
+      visibility: riskItem.visibility,
+      status: riskItem.status,
+    };
+  }
+
+  function toFileRow(fileItem) {
+    return {
+      id: fileItem.id,
+      uploaded_by: fileItem.uploadedBy || null,
+      related_type: fileItem.relatedType,
+      related_id: fileItem.relatedId,
+      title: fileItem.title,
+      file_type: fileItem.fileType,
+      drive_url: fileItem.driveUrl,
+    };
+  }
+
+  async function remoteInsert(table, row) {
+    if (!supabaseClient || !activeAccount()) return false;
+    const { error } = await supabaseClient.from(table).insert(row);
+    if (error) throw error;
+    return true;
+  }
+
+  async function remoteUpdate(table, id, patch) {
+    if (!supabaseClient || !activeAccount()) return false;
+    const { error } = await supabaseClient.from(table).update(patch).eq("id", id);
+    if (error) throw error;
+    return true;
+  }
+
+  async function tryRemote(label, operation) {
+    try {
+      const synced = await operation();
+      if (synced) return true;
+    } catch (error) {
+      console.warn(error);
+      toast("Salvat local", `${label} nu s-a sincronizat in Supabase: ${error.message || "eroare necunoscuta"}`);
+      return false;
+    }
+    return false;
   }
 
   function memberInitials(idOrName) {
@@ -1198,7 +1329,7 @@
         column.classList.add("is-over");
       });
       column.addEventListener("dragleave", () => column.classList.remove("is-over"));
-      column.addEventListener("drop", (event) => {
+      column.addEventListener("drop", async (event) => {
         event.preventDefault();
         column.classList.remove("is-over");
         const taskId = event.dataTransfer.getData("text/plain");
@@ -1206,6 +1337,12 @@
         if (taskItem && taskItem.status !== column.dataset.status) {
           taskItem.status = column.dataset.status;
           taskItem.updatedAt = new Date().toISOString();
+          await tryRemote("Mutarea task-ului", () =>
+            remoteUpdate("tasks", taskItem.id, {
+              status: taskItem.status,
+              updated_at: taskItem.updatedAt,
+            }),
+          );
           saveState(`Task mutat în ${column.dataset.status}`);
           renderBoard();
           toast("Status actualizat", `${taskItem.id} este acum în ${column.dataset.status}.`);
@@ -1362,7 +1499,7 @@
 
   function attachLogForm(form) {
     if (!form) return;
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(form);
       const logItem = {
@@ -1384,7 +1521,8 @@
         submittedAt: new Date().toISOString(),
       };
       state.logs.unshift(logItem);
-      if (logItem.convertToTask) createTaskFromLog(logItem, false);
+      await tryRemote("Logul", () => remoteInsert("operational_logs", toLogRow(logItem)));
+      if (logItem.convertToTask) await createTaskFromLog(logItem, false);
       saveState("Log operațional creat");
       render();
       closeModal();
@@ -1394,26 +1532,27 @@
 
   function attachLogActions() {
     view.querySelectorAll("[data-log-close]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const logItem = state.logs.find((item) => item.id === button.dataset.logClose);
         if (!logItem) return;
         logItem.status = "Închis";
+        await tryRemote("Inchiderea logului", () => remoteUpdate("operational_logs", logItem.id, { status: logItem.status }));
         saveState("Log închis");
         renderLogs();
         toast("Raportare închisă", logItem.title);
       });
     });
     view.querySelectorAll("[data-log-task]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const logItem = state.logs.find((item) => item.id === button.dataset.logTask);
         if (!logItem) return;
-        const created = createTaskFromLog(logItem, true);
+        const created = await createTaskFromLog(logItem, true);
         toast("Task generat", `${created.id} a fost creat din ${logItem.id}.`);
       });
     });
   }
 
-  function createTaskFromLog(logItem, shouldRender) {
+  async function createTaskFromLog(logItem, shouldRender) {
     const created = {
       id: nextId("TASK", state.tasks),
       title: logItem.title,
@@ -1435,6 +1574,14 @@
     logItem.relatedTaskId = created.id;
     logItem.needsFollowUp = true;
     logItem.status = "Follow-up";
+    await tryRemote("Taskul generat din log", () => remoteInsert("tasks", toTaskRow(created)));
+    await tryRemote("Actualizarea logului", () =>
+      remoteUpdate("operational_logs", logItem.id, {
+        related_task_id: logItem.relatedTaskId,
+        needs_follow_up: logItem.needsFollowUp,
+        status: logItem.status,
+      }),
+    );
     saveState("Task creat din log");
     if (shouldRender) renderLogs();
     return created;
@@ -1545,7 +1692,7 @@
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
   }
 
-  function handleClockToggle() {
+  async function handleClockToggle() {
     if (state.clock) {
       const start = new Date(state.clock.start);
       const hours = Math.max(0.25, Math.round(((Date.now() - start.getTime()) / 3600000) * 4) / 4);
@@ -1565,6 +1712,7 @@
       };
       state.timeEntries.unshift(entry);
       state.clock = null;
+      await tryRemote("Pontajul", () => remoteInsert("time_entries", toTimeEntryRow(entry)));
       saveState("Sesiune pontaj închisă");
       renderTime();
       toast("Pontaj creat", `${entry.hours} ore au fost adăugate.`);
@@ -1627,7 +1775,7 @@
     `;
   }
 
-  function handleTimeSubmit(event) {
+  async function handleTimeSubmit(event) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const entry = {
@@ -1645,6 +1793,7 @@
       createdAt: new Date().toISOString(),
     };
     state.timeEntries.unshift(entry);
+    await tryRemote("Pontajul", () => remoteInsert("time_entries", toTimeEntryRow(entry)));
     saveState("Pontaj creat");
     renderTime();
     toast("Pontaj adăugat", `${entry.id} a fost salvat.`);
@@ -1677,21 +1826,33 @@
 
   function attachTimeValidation() {
     view.querySelectorAll("[data-time-accept]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const entry = state.timeEntries.find((item) => item.id === button.dataset.timeAccept);
         if (!entry) return;
         entry.validationStatus = "Acceptat";
         entry.validatedBy = "MEM-0011";
+        await tryRemote("Validarea pontajului", () =>
+          remoteUpdate("time_entries", entry.id, {
+            validation_status: entry.validationStatus,
+            validated_by: entry.validatedBy,
+          }),
+        );
         saveState("Pontaj acceptat");
         renderTime();
       });
     });
     view.querySelectorAll("[data-time-clarify]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const entry = state.timeEntries.find((item) => item.id === button.dataset.timeClarify);
         if (!entry) return;
         entry.validationStatus = "Necesită clarificare";
         entry.validatedBy = "MEM-0011";
+        await tryRemote("Clarificarea pontajului", () =>
+          remoteUpdate("time_entries", entry.id, {
+            validation_status: entry.validationStatus,
+            validated_by: entry.validatedBy,
+          }),
+        );
         saveState("Pontaj marcat pentru clarificare");
         renderTime();
       });
@@ -1810,7 +1971,7 @@
       </form>
     `);
 
-    document.getElementById("memberForm").addEventListener("submit", (event) => {
+    document.getElementById("memberForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const memberItem = {
@@ -1826,6 +1987,7 @@
         addedAt: new Date().toISOString().slice(0, 10),
       };
       state.members.push(memberItem);
+      await tryRemote("Membrul", () => remoteInsert("members", toMemberRow(memberItem)));
       saveState("Membru adăugat");
       closeModal();
       renderMembers();
@@ -1898,6 +2060,16 @@
     `;
 
     view.querySelector('[data-action="open-risk"]').addEventListener("click", () => openRiskModal());
+    view.querySelectorAll("[data-risk-close]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const riskItem = state.risks.find((item) => item.id === button.dataset.riskClose);
+        if (!riskItem) return;
+        riskItem.status = "Monitorizat";
+        await tryRemote("Actualizarea riscului", () => remoteUpdate("risks", riskItem.id, { status: riskItem.status }));
+        saveState("Risc monitorizat");
+        renderRisks();
+      });
+    });
   }
 
   function riskRow(riskItem) {
@@ -1965,10 +2137,10 @@
       </form>
     `);
 
-    document.getElementById("riskForm").addEventListener("submit", (event) => {
+    document.getElementById("riskForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
-      state.risks.unshift({
+      const riskItem = {
         id: nextId("RISK", state.risks),
         category: data.get("category"),
         description: data.get("description").trim(),
@@ -1978,7 +2150,9 @@
         visibility: data.get("visibility"),
         status: "Deschis",
         createdAt: new Date().toISOString(),
-      });
+      };
+      state.risks.unshift(riskItem);
+      await tryRemote("Riscul", () => remoteInsert("risks", toRiskRow(riskItem)));
       saveState("Risc creat");
       closeModal();
       renderRisks();
@@ -2089,10 +2263,10 @@
       </form>
     `);
 
-    document.getElementById("fileForm").addEventListener("submit", (event) => {
+    document.getElementById("fileForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
-      state.files.unshift({
+      const fileItem = {
         id: nextId("FILE", state.files),
         uploadedBy: data.get("uploadedBy"),
         relatedType: data.get("relatedType"),
@@ -2101,7 +2275,9 @@
         fileType: data.get("fileType"),
         driveUrl: data.get("driveUrl").trim(),
         uploadedAt: new Date().toISOString(),
-      });
+      };
+      state.files.unshift(fileItem);
+      await tryRemote("Fisierul", () => remoteInsert("files", toFileRow(fileItem)));
       saveState("Fișier indexat");
       closeModal();
       renderArchive();
@@ -2421,7 +2597,7 @@
       ${taskForm(defaults)}
     `);
 
-    document.getElementById("taskForm").addEventListener("submit", (event) => {
+    document.getElementById("taskForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
       const taskItem = {
@@ -2442,6 +2618,7 @@
         updatedAt: new Date().toISOString(),
       };
       state.tasks.unshift(taskItem);
+      await tryRemote("Taskul", () => remoteInsert("tasks", toTaskRow(taskItem)));
       saveState("Task creat");
       closeModal();
       render();
@@ -2486,9 +2663,15 @@
     `);
 
     modalContent.querySelectorAll("[data-task-status]").forEach((button) => {
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         taskItem.status = button.dataset.taskStatus;
         taskItem.updatedAt = new Date().toISOString();
+        await tryRemote("Actualizarea taskului", () =>
+          remoteUpdate("tasks", taskItem.id, {
+            status: taskItem.status,
+            updated_at: taskItem.updatedAt,
+          }),
+        );
         saveState("Status task actualizat");
         closeModal();
         render();
