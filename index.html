@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ro">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MEU Atlas | HR & Operațiuni</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen" hidden>
+      <div class="login-card">
+        <div class="login-brand">
+          <img src="./assets/meu-logo-albastru.png" alt="Model European Union Timișoara" />
+          <div>
+            <p class="eyebrow">MEU Atlas</p>
+            <h1>Autentificare internă</h1>
+            <p class="lead">Acces pe roluri pentru HR, operațiuni, leadership și compliance.</p>
+          </div>
+        </div>
+        <form id="loginForm" class="form-grid">
+          <div class="field full">
+            <label>Username</label>
+            <input name="username" autocomplete="username" required />
+          </div>
+          <div class="field full">
+            <label>Parolă</label>
+            <input name="password" type="password" autocomplete="current-password" required />
+          </div>
+          <div class="field full">
+            <button class="primary-button" type="submit">
+              <i data-lucide="log-in"></i>
+              Intră în platformă
+            </button>
+          </div>
+        </form>
+        <div class="login-support" id="loginSupport">
+          <strong>Acces intern MEU Timișoara</strong>
+          <span>Conturile sunt create de administrator. Dacă nu ai acces, contactează echipa de coordonare.</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navigare principală">
+        <a class="brand" href="#dashboard" aria-label="MEU Atlas">
+          <img src="./assets/meu-logo-albastru.png" alt="Model European Union Timișoara" />
+          <span>
+            <strong>MEU Atlas</strong>
+            <small>HR & Operațiuni</small>
+          </span>
+        </a>
+
+        <nav class="nav-list" id="navList"></nav>
+
+        <div class="sidebar-footer">
+          <img src="./assets/meu-logo-albastru.png" alt="" aria-hidden="true" />
+          <div>
+            <strong>MEU Timișoara 2026</strong>
+            <small>Spațiu intern</small>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <button class="icon-button menu-toggle" id="menuToggle" aria-label="Deschide meniul">
+            <i data-lucide="menu"></i>
+          </button>
+          <div class="global-search">
+            <i data-lucide="search"></i>
+            <input id="globalSearch" type="search" placeholder="Caută membri, task-uri, loguri..." />
+          </div>
+          <div class="topbar-actions">
+            <button class="soft-button" id="newLogTop">
+              <i data-lucide="message-square-plus"></i>
+              Log rapid
+            </button>
+            <button class="primary-button" id="newTaskTop">
+              <i data-lucide="plus"></i>
+              Task nou
+            </button>
+            <button class="icon-button" id="themeToggle" aria-label="Schimbă tema">
+              <i data-lucide="moon"></i>
+            </button>
+            <div class="user-chip">
+              <img src="./assets/meu-logo-albastru.png" alt="" aria-hidden="true" />
+              <span id="currentUserChip">Admin MEU</span>
+            </div>
+            <button class="icon-button" id="logoutButton" aria-label="Ieșire">
+              <i data-lucide="log-out"></i>
+            </button>
+          </div>
+        </header>
+
+        <section class="content" id="view" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="modalBackdrop" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <button class="icon-button modal-close" id="modalClose" aria-label="Închide">
+          <i data-lucide="x"></i>
+        </button>
+        <div id="modalContent"></div>
+      </section>
+    </div>
+
+    <div class="toast-stack" id="toastStack" aria-live="assertive"></div>
+
+    <section class="access-widget" id="accessWidget">
+      <button class="access-toggle" id="accessToggle" aria-label="Deschide setările de accesibilitate" aria-expanded="false">
+        <i data-lucide="accessibility"></i>
+      </button>
+      <div class="access-panel" id="accessPanel" hidden>
+        <div class="access-head">
+          <img src="./assets/meu-logo-albastru.png" alt="" aria-hidden="true" />
+          <div>
+            <strong>MEU Access</strong>
+            <span>Setări de accesibilitate</span>
+          </div>
+          <button class="icon-button" id="accessClose" aria-label="Închide accesibilitatea">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div class="access-controls">
+          <button data-access="contrast"><i data-lucide="contrast"></i>Contrast ridicat</button>
+          <button data-access="text"><i data-lucide="case-sensitive"></i>Text mai mare</button>
+          <button data-access="spacing"><i data-lucide="align-justify"></i>Spațiere text</button>
+          <button data-access="font"><i data-lucide="type"></i>Font lizibil</button>
+          <button data-access="links"><i data-lucide="link"></i>Linkuri vizibile</button>
+          <button data-access="motion"><i data-lucide="pause-circle"></i>Reduce animații</button>
+          <button data-access="grayscale"><i data-lucide="circle-dot"></i>Mod gri</button>
+          <button data-access="focus"><i data-lucide="scan-line"></i>Focus citire</button>
+        </div>
+        <button class="ghost-button access-reset" id="accessReset">
+          <i data-lucide="rotate-ccw"></i>
+          Resetează accesibilitatea
+        </button>
+      </div>
+    </section>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
