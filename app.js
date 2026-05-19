@@ -25,6 +25,8 @@
   ];
   let realtimeChannel = null;
   let realtimeReloadTimer = null;
+  const seedMemberIds = new Set(Array.from({ length: 22 }, (_, index) => `MEM-${String(index + 1).padStart(4, "0")}`));
+  const protectedUsernames = new Set(["admin.meu"]);
 
   const defaultAccounts = [
     { username: "admin.meu", password: "Atlas2026!", name: "Admin MEU", role: "Admin", memberId: "MEM-0005", scope: "Toate departamentele" },
@@ -923,6 +925,16 @@
     return data;
   }
 
+  async function adminToolRemote(action, payload = {}) {
+    if (!supabaseClient) throw new Error("Supabase nu este încărcat.");
+    const { data, error } = await supabaseClient.functions.invoke("admin-tools", {
+      body: { action, ...payload },
+    });
+    if (error) throw error;
+    if (data?.error) throw new Error(data.error);
+    return data;
+  }
+
   function toTaskRow(taskItem) {
     return {
       id: taskItem.id,
@@ -1075,6 +1087,165 @@
     return false;
   }
 
+  function isAdminAccount() {
+    return activeAccount()?.role === "Admin";
+  }
+
+  function deleteButton(entity, id, label, variant = "danger-button") {
+    if (!isAdminAccount()) return "";
+    return `
+      <button class="${variant} delete-button" data-delete-type="${escapeHtml(entity)}" data-delete-id="${escapeHtml(id)}" data-delete-label="${escapeHtml(label)}">
+        <i data-lucide="trash-2"></i>Șterge
+      </button>
+    `;
+  }
+
+  function localDeleteRecord(entity, id) {
+    const removeFrom = (key, predicate) => {
+      const before = state[key].length;
+      state[key] = state[key].filter((item) => !predicate(item));
+      return before - state[key].length;
+    };
+
+    if (entity === "task") {
+      state.logs.forEach((item) => {
+        if (item.relatedTaskId === id) item.relatedTaskId = "";
+      });
+      state.timeEntries.forEach((item) => {
+        if (item.relatedTaskId === id) item.relatedTaskId = "";
+      });
+      state.files = state.files.filter((item) => !(item.relatedType === "Task" && item.relatedId === id));
+      return removeFrom("tasks", (item) => item.id === id);
+    }
+    if (entity === "log") {
+      state.tasks.forEach((item) => {
+        if (item.relatedLogId === id) item.relatedLogId = "";
+      });
+      state.timeEntries.forEach((item) => {
+        if (item.relatedLogId === id) item.relatedLogId = "";
+      });
+      state.files = state.files.filter((item) => !(item.relatedType === "Log" && item.relatedId === id));
+      return removeFrom("logs", (item) => item.id === id);
+    }
+    if (entity === "time") return removeFrom("timeEntries", (item) => item.id === id);
+    if (entity === "risk") {
+      state.files = state.files.filter((item) => !(item.relatedType === "Risc" && item.relatedId === id));
+      return removeFrom("risks", (item) => item.id === id);
+    }
+    if (entity === "file") return removeFrom("files", (item) => item.id === id);
+    if (entity === "registry") {
+      state.registryHistory = (state.registryHistory || []).filter((item) => item.registryEntryId !== id);
+      return removeFrom("registryEntries", (item) => item.id === id);
+    }
+    if (entity === "member") {
+      state.accounts.forEach((item) => {
+        if (item.memberId === id) item.memberId = "";
+      });
+      state.roles.forEach((item) => {
+        if (item.memberId === id) item.memberId = "";
+      });
+      state.tasks.forEach((item) => {
+        if (item.ownerId === id) item.ownerId = "";
+      });
+      state.logs.forEach((item) => {
+        if (item.submittedBy === id) item.submittedBy = "";
+        if (item.followUpOwnerId === id) item.followUpOwnerId = "";
+      });
+      state.timeEntries.forEach((item) => {
+        if (item.memberId === id) item.memberId = "";
+        if (item.validatedBy === id) item.validatedBy = "";
+      });
+      state.risks.forEach((item) => {
+        if (item.ownerId === id) item.ownerId = "";
+      });
+      state.files.forEach((item) => {
+        if (item.uploadedBy === id) item.uploadedBy = "";
+      });
+      (state.registryEntries || []).forEach((item) => {
+        if (item.requesterId === id) item.requesterId = "";
+      });
+      (state.registryHistory || []).forEach((item) => {
+        if (item.actorId === id) item.actorId = "";
+      });
+      return removeFrom("members", (item) => item.id === id);
+    }
+    if (entity === "account") return removeFrom("accounts", (item) => item.username === id);
+    return 0;
+  }
+
+  async function deleteRecord(entity, id, label) {
+    if (!isAdminAccount()) {
+      toast("Acces refuzat", "Doar Admin poate șterge definitiv date.");
+      return;
+    }
+    if (entity === "account" && protectedUsernames.has(id)) {
+      toast("Cont protejat", "Contul admin.meu nu se șterge din platformă.");
+      return;
+    }
+    if (entity === "member" && seedMemberIds.has(id)) {
+      toast("Membru protejat", "Membrii de bază rămân în structură. Poți șterge membrii adăugați în teste.");
+      return;
+    }
+    if (!confirm(`Ștergi definitiv ${label}?`)) return;
+
+    try {
+      if (supabaseClient) {
+        await adminToolRemote("delete-record", { entity, id });
+        await loadRemoteData();
+      } else {
+        localDeleteRecord(entity, id);
+        saveState(`Șters: ${label}`);
+      }
+      closeModal();
+      render();
+      toast("Șters", `${label} a fost eliminat.`);
+    } catch (error) {
+      console.warn(error);
+      toast("Nu am putut șterge", error.message || "Verifică funcția admin-tools în Supabase.");
+    }
+  }
+
+  async function resetTestData() {
+    if (!isAdminAccount()) return;
+    const confirmed = confirm(
+      "Curăți datele de test? Se șterg task-uri, loguri, pontaje, riscuri, fișiere, registratura, conturile create după admin.meu și membrii adăugați în teste.",
+    );
+    if (!confirmed) return;
+
+    try {
+      if (supabaseClient) {
+        const result = await adminToolRemote("reset-test-data");
+        await loadRemoteData();
+        saveState("Date de test curățate");
+        render();
+        toast("Date curățate", result?.message || "Platforma a fost curățată pentru teste noi.");
+        return;
+      }
+
+      const current = activeAccount();
+      state = seedState();
+      state.currentAccount = current;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      render();
+      toast("Date resetate", "Platforma locală a revenit la setul inițial.");
+    } catch (error) {
+      console.warn(error);
+      toast("Reset nereușit", error.message || "Verifică funcția admin-tools în Supabase.");
+    }
+  }
+
+  function attachDeleteButtons(root = document) {
+    root.querySelectorAll("[data-delete-type]").forEach((button) => {
+      if (button.dataset.deleteBound === "1") return;
+      button.dataset.deleteBound = "1";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        deleteRecord(button.dataset.deleteType, button.dataset.deleteId, button.dataset.deleteLabel || "elementul selectat");
+      });
+    });
+  }
+
   function memberInitials(idOrName) {
     const name = idOrName?.startsWith?.("MEM-") ? memberName(idOrName) : idOrName || "MEU";
     return name
@@ -1178,6 +1349,7 @@
     if (route === "archive") renderArchive();
     if (route === "admin") renderAdmin();
 
+    attachDeleteButtons(view);
     refreshIcons();
   }
 
@@ -1443,6 +1615,7 @@
           <span class="avatar-small">${escapeHtml(memberInitials(taskItem.ownerId))}</span>
           <span>${escapeHtml(memberName(taskItem.ownerId))}</span>
           ${taskItem.evidenceUrl ? `<span class="tag">Dovadă</span>` : ""}
+          ${deleteButton("task", taskItem.id, `taskul ${taskItem.id}`, "ghost-button")}
         </div>
       </article>
     `;
@@ -1629,6 +1802,7 @@
         <div class="button-row">
           ${logItem.status !== "Închis" ? `<button class="ghost-button" data-log-close="${logItem.id}"><i data-lucide="check-circle-2"></i>Închide</button>` : ""}
           <button class="soft-button" data-log-task="${logItem.id}"><i data-lucide="copy-plus"></i>Task</button>
+          ${deleteButton("log", logItem.id, `logul ${logItem.id}`, "danger-button")}
         </div>
       </article>
     `;
@@ -1956,6 +2130,7 @@
           <span class="status-pill ${statusClass(entry.validationStatus)}">${escapeHtml(entry.validationStatus)}</span>
           ${entry.validationStatus !== "Acceptat" ? `<button class="soft-button" data-time-accept="${entry.id}"><i data-lucide="badge-check"></i>Acceptă</button>` : ""}
           ${entry.validationStatus !== "Necesită clarificare" ? `<button class="ghost-button" data-time-clarify="${entry.id}"><i data-lucide="circle-help"></i>Clarifică</button>` : ""}
+          ${deleteButton("time", entry.id, `pontajul ${entry.id}`, "danger-button")}
         </div>
       </article>
     `;
@@ -2044,7 +2219,7 @@
 
   function memberRow(memberItem) {
     return `
-      <button class="member-row" data-member-detail="${memberItem.id}">
+      <article class="member-row">
         <span class="avatar">${escapeHtml(memberInitials(memberItem.name))}</span>
         <span>
           <strong>${escapeHtml(memberItem.name)}</strong>
@@ -2061,8 +2236,10 @@
           <span class="status-pill ${statusClass(memberItem.status)}">${escapeHtml(memberItem.status)}</span>
           ${memberItem.safePerson ? `<span class="badge teal">Safe Person</span>` : ""}
           <span class="tag">${escapeHtml(memberItem.accessLevel)}</span>
+          <button class="ghost-button" data-member-detail="${memberItem.id}"><i data-lucide="eye"></i>Detalii</button>
+          ${seedMemberIds.has(memberItem.id) ? "" : deleteButton("member", memberItem.id, `membrul ${memberItem.name}`, "danger-button")}
         </span>
-      </button>
+      </article>
     `;
   }
 
@@ -2156,6 +2333,9 @@
         <p><strong>Manager:</strong> ${escapeHtml(memberItem.manager || "Nesetat")}</p>
         <p><strong>Status:</strong> ${escapeHtml(memberItem.status)}</p>
       </section>
+      <div class="button-row" style="margin-top:14px">
+        ${deleteButton("member", memberItem.id, `membrul ${memberItem.name}`, "danger-button")}
+      </div>
     `);
   }
 
@@ -2197,7 +2377,7 @@
 
   function registryRow(entry) {
     return `
-      <button class="registry-row" data-registry-detail="${entry.id}">
+      <article class="registry-row">
         <span>
           <strong>${escapeHtml(entry.registryNumber)}</strong>
           <span class="row-meta">
@@ -2211,8 +2391,12 @@
           <span class="row-meta">${escapeHtml(entry.summary || "Fără descriere")}</span>
         </span>
         <span class="tag">${escapeHtml(entry.department || "General")}</span>
-        <span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status)}</span>
-      </button>
+        <span class="button-row">
+          <span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status)}</span>
+          <button class="ghost-button" data-registry-detail="${entry.id}"><i data-lucide="eye"></i>Detalii</button>
+          ${deleteButton("registry", entry.id, `numărul ${entry.registryNumber}`, "danger-button")}
+        </span>
+      </article>
     `;
   }
 
@@ -2374,6 +2558,9 @@
           <button class="primary-button" type="submit"><i data-lucide="history"></i>Actualizează istoricul</button>
         </div>
       </form>
+      <div class="button-row" style="margin-top:14px">
+        ${deleteButton("registry", entry.id, `numărul ${entry.registryNumber}`, "danger-button")}
+      </div>
     `);
 
     document.getElementById("registryHistoryForm").addEventListener("submit", async (event) => {
@@ -2481,7 +2668,10 @@
           <strong>${escapeHtml(memberName(riskItem.ownerId))}</strong>
           <p class="meta">${escapeHtml(riskItem.status)}</p>
         </div>
-        <button class="ghost-button" data-risk-close="${riskItem.id}"><i data-lucide="check"></i>Monitorizat</button>
+        <div class="button-row">
+          <button class="ghost-button" data-risk-close="${riskItem.id}"><i data-lucide="check"></i>Monitorizat</button>
+          ${deleteButton("risk", riskItem.id, `riscul ${riskItem.id}`, "danger-button")}
+        </div>
       </article>
     `;
   }
@@ -2618,6 +2808,7 @@
         <a class="soft-button" href="${escapeHtml(fileItem.driveUrl)}" target="_blank" rel="noreferrer">
           <i data-lucide="external-link"></i>Deschide
         </a>
+        ${deleteButton("file", fileItem.id, `fișierul ${fileItem.id}`, "danger-button")}
       </article>
     `;
   }
@@ -2686,7 +2877,7 @@
         "Configurare",
         "Admin platformă",
         "Conturi, roluri, exporturi, audit și pregătirea pentru GitHub Pages + Supabase.",
-        `<button class="danger-button" data-action="reset-demo"><i data-lucide="rotate-ccw"></i>Reset demo</button>`,
+        `<button class="danger-button" data-action="reset-test-data"><i data-lucide="trash-2"></i>Curăță teste</button>`,
       )}
 
       <div class="admin-hero">
@@ -2723,6 +2914,15 @@
             <span><i data-lucide="check-circle-2"></i>Tabele Postgres pentru membri, task-uri, loguri, pontaj</span>
             <span><i data-lucide="check-circle-2"></i>RLS pentru acces pe roluri</span>
           </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title">
+            <h2>Laborator testare</h2>
+            <span class="badge amber">Admin only</span>
+          </div>
+          <p class="lead">Curăță rapid datele introduse în teste: task-uri, loguri, pontaje, riscuri, fișiere, registratură, conturi create și membri adăugați.</p>
+          <button class="danger-button" data-action="reset-test-data"><i data-lucide="trash-2"></i>Curăță datele de test</button>
         </section>
       </div>
 
@@ -2819,13 +3019,8 @@
         toast("Cont actualizat", `${account.username} este ${account.status}.`);
       });
     });
-    view.querySelector('[data-action="reset-demo"]').addEventListener("click", () => {
-      if (!confirm("Resetezi datele demo MEU Atlas?")) return;
-      localStorage.removeItem(STORAGE_KEY);
-      state = seedState();
-      saveState("Reset demo");
-      render();
-      toast("Date resetate", "Platforma a revenit la setul inițial.");
+    view.querySelectorAll('[data-action="reset-test-data"]').forEach((button) => {
+      button.addEventListener("click", resetTestData);
     });
     view.querySelectorAll("[data-export]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -2851,6 +3046,7 @@
           <i data-lucide="${account.status === "Suspendat" ? "unlock" : "lock"}"></i>
           ${account.status === "Suspendat" ? "Activează" : "Suspendă"}
         </button>
+        ${protectedUsernames.has(account.username) ? "" : deleteButton("account", account.username, `contul ${account.username}`, "danger-button")}
       </article>
     `;
   }
@@ -3055,6 +3251,7 @@
       </section>
       <div class="button-row" style="margin-top:14px">
         ${statuses.map((status) => `<button class="ghost-button" data-task-status="${status}" data-task="${taskId}">${escapeHtml(status)}</button>`).join("")}
+        ${deleteButton("task", taskItem.id, `taskul ${taskItem.id}`, "danger-button")}
       </div>
     `);
 
@@ -3088,6 +3285,7 @@
   function openModal(html) {
     modalContent.innerHTML = html;
     modalBackdrop.hidden = false;
+    attachDeleteButtons(modalContent);
     refreshIcons();
   }
 

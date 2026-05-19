@@ -246,6 +246,42 @@ Dupa deploy, testezi din platforma:
 
 Nu pune niciodata cheia `service_role` in `app.js`, `index.html` sau GitHub Pages. Ea trebuie sa ramana doar in Supabase / Edge Function.
 
+## Partea E4 - Publici functia admin-tools pentru stergeri si reset teste
+
+Pentru testare rapida, platforma are acum:
+
+- butoane **Sterge** pe inregistrari;
+- buton **Admin > Curata datele de test**;
+- protectie pentru `admin.meu` si membrii de baza.
+
+In Supabase, rulezi mai intai SQL-ul mic pentru resetarea contorului de registratura:
+
+1. Supabase > SQL Editor.
+2. New query.
+3. Copiezi tot din `supabase-admin-tools.sql`.
+4. Run.
+
+Apoi publici Edge Function:
+
+```bash
+supabase functions deploy admin-tools --project-ref rwrrtgnsslyquyjaakwb --use-api
+```
+
+Pe Windows, daca folosesti varianta cu `npx.cmd`, comanda este:
+
+```powershell
+npx.cmd -y supabase@latest functions deploy admin-tools --project-ref rwrrtgnsslyquyjaakwb --use-api
+```
+
+Dupa deploy:
+
+1. Intri live ca `admin.meu`.
+2. Creezi un task / log / pontaj / numar de registratura de test.
+3. Apesi **Sterge** pe acel element.
+4. Pentru reset mare, mergi la **Admin > Curata datele de test**.
+
+Resetul mare sterge datele introduse pentru teste: task-uri, loguri, pontaje, riscuri, fisiere, registratura, conturi create dupa `admin.meu` si membri adaugati peste structura initiala. Nu sterge `admin.meu` si nu sterge membrii de baza.
+
 ## Partea F - Ce imi trimiti mie dupa ce faci GitHub + Supabase
 
 Trimite-mi:

@@ -650,6 +650,15 @@ h3 {
   color: var(--red);
 }
 
+.delete-button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.task-card .delete-button {
+  margin-left: auto;
+}
+
 .icon-button {
   width: 40px;
   padding: 0;
@@ -1262,7 +1271,7 @@ h3 {
 
 .admin-hero {
   display: grid;
-  grid-template-columns: minmax(360px, 0.95fr) minmax(0, 1.05fr);
+  grid-template-columns: minmax(320px, 1.05fr) minmax(0, 1fr) minmax(280px, 0.9fr);
   gap: 18px;
   align-items: stretch;
 }
@@ -1331,7 +1340,8 @@ h3 {
 }
 
 .account-card .tag,
-.account-card .ghost-button {
+.account-card .ghost-button,
+.account-card .danger-button {
   grid-column: 2 / -1;
   justify-self: start;
 }
