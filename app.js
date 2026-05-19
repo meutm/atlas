@@ -685,6 +685,7 @@
       relatedLogId: row.related_log_id || "",
       createdAt: row.created_at || "",
       updatedAt: row.updated_at || "",
+      createdBy: row.created_by || "",
     };
   }
 
@@ -706,6 +707,7 @@
       visibility: row.visibility,
       status: row.status,
       submittedAt: row.created_at || "",
+      createdBy: row.created_by || "",
     };
   }
 
@@ -723,6 +725,7 @@
       validationStatus: row.validation_status,
       validatedBy: row.validated_by || "",
       createdAt: row.created_at || "",
+      createdBy: row.created_by || "",
     };
   }
 
@@ -737,6 +740,7 @@
       visibility: row.visibility,
       status: row.status,
       createdAt: row.created_at || "",
+      createdBy: row.created_by || "",
     };
   }
 
@@ -750,6 +754,7 @@
       fileType: row.file_type,
       driveUrl: row.drive_url,
       uploadedAt: row.created_at || "",
+      createdBy: row.created_by || "",
     };
   }
 
@@ -794,6 +799,7 @@
       memberId: row.member_id || "",
       scope: row.department_scope || "",
       status: row.status || "Activ",
+      authUserId: row.id || "",
     };
   }
 
@@ -873,6 +879,7 @@
       memberId: data.member_id || "",
       scope: data.department_scope,
       status: data.status || "Activ",
+      authUserId: data.id || user.id || "",
     };
   }
 
@@ -949,6 +956,7 @@
       blocker_text: taskItem.blockerText || "",
       evidence_url: taskItem.evidenceUrl || "",
       related_log_id: taskItem.relatedLogId || null,
+      created_by: taskItem.createdBy || currentAuthUserId() || null,
       updated_at: new Date().toISOString(),
     };
   }
@@ -969,6 +977,7 @@
       evidence_url: logItem.evidenceUrl || "",
       visibility: logItem.visibility,
       status: logItem.status,
+      created_by: logItem.createdBy || currentAuthUserId() || null,
     };
   }
 
@@ -985,6 +994,7 @@
       notes: entry.notes || "",
       validation_status: entry.validationStatus,
       validated_by: entry.validatedBy || null,
+      created_by: entry.createdBy || currentAuthUserId() || null,
     };
   }
 
@@ -1012,6 +1022,7 @@
       mitigation: riskItem.mitigation || "",
       visibility: riskItem.visibility,
       status: riskItem.status,
+      created_by: riskItem.createdBy || currentAuthUserId() || null,
     };
   }
 
@@ -1024,6 +1035,7 @@
       title: fileItem.title,
       file_type: fileItem.fileType,
       drive_url: fileItem.driveUrl,
+      created_by: fileItem.createdBy || currentAuthUserId() || null,
     };
   }
 
@@ -1091,8 +1103,32 @@
     return activeAccount()?.role === "Admin";
   }
 
-  function deleteButton(entity, id, label, variant = "danger-button") {
-    if (!isAdminAccount()) return "";
+  function currentAuthUserId() {
+    return activeAccount()?.authUserId || "";
+  }
+
+  function createdByCurrentUser(item) {
+    const authUserId = currentAuthUserId();
+    return Boolean(authUserId && item?.createdBy === authUserId);
+  }
+
+  function canDeleteRecord(entity, item) {
+    const account = activeAccount();
+    if (!account) return false;
+    if (account.role === "Admin") return true;
+    if (!item) return false;
+    const memberId = account.memberId;
+    if (entity === "task") return createdByCurrentUser(item) || item.ownerId === memberId;
+    if (entity === "log") return createdByCurrentUser(item) || item.submittedBy === memberId || item.followUpOwnerId === memberId;
+    if (entity === "time") return createdByCurrentUser(item) || item.memberId === memberId;
+    if (entity === "risk") return createdByCurrentUser(item) || item.ownerId === memberId;
+    if (entity === "file") return createdByCurrentUser(item) || item.uploadedBy === memberId;
+    if (entity === "registry") return createdByCurrentUser(item) || item.requesterId === memberId;
+    return false;
+  }
+
+  function deleteButton(entity, id, label, variant = "danger-button", item = null) {
+    if (!canDeleteRecord(entity, item)) return "";
     return `
       <button class="${variant} delete-button" data-delete-type="${escapeHtml(entity)}" data-delete-id="${escapeHtml(id)}" data-delete-label="${escapeHtml(label)}">
         <i data-lucide="trash-2"></i>Șterge
@@ -1174,8 +1210,9 @@
   }
 
   async function deleteRecord(entity, id, label) {
-    if (!isAdminAccount()) {
-      toast("Acces refuzat", "Doar Admin poate șterge definitiv date.");
+    const item = localRecord(entity, id);
+    if (!canDeleteRecord(entity, item)) {
+      toast("Acces refuzat", "Poți șterge doar ce ai creat tu sau ce este asociat contului tău.");
       return;
     }
     if (entity === "account" && protectedUsernames.has(id)) {
@@ -1203,6 +1240,18 @@
       console.warn(error);
       toast("Nu am putut șterge", error.message || "Verifică funcția admin-tools în Supabase.");
     }
+  }
+
+  function localRecord(entity, id) {
+    if (entity === "task") return state.tasks.find((item) => item.id === id);
+    if (entity === "log") return state.logs.find((item) => item.id === id);
+    if (entity === "time") return state.timeEntries.find((item) => item.id === id);
+    if (entity === "risk") return state.risks.find((item) => item.id === id);
+    if (entity === "file") return state.files.find((item) => item.id === id);
+    if (entity === "registry") return (state.registryEntries || []).find((item) => item.id === id);
+    if (entity === "member") return state.members.find((item) => item.id === id);
+    if (entity === "account") return state.accounts.find((item) => item.username === id);
+    return null;
   }
 
   async function resetTestData() {
@@ -1615,7 +1664,7 @@
           <span class="avatar-small">${escapeHtml(memberInitials(taskItem.ownerId))}</span>
           <span>${escapeHtml(memberName(taskItem.ownerId))}</span>
           ${taskItem.evidenceUrl ? `<span class="tag">Dovadă</span>` : ""}
-          ${deleteButton("task", taskItem.id, `taskul ${taskItem.id}`, "ghost-button")}
+          ${deleteButton("task", taskItem.id, `taskul ${taskItem.id}`, "ghost-button", taskItem)}
         </div>
       </article>
     `;
@@ -1802,7 +1851,7 @@
         <div class="button-row">
           ${logItem.status !== "Închis" ? `<button class="ghost-button" data-log-close="${logItem.id}"><i data-lucide="check-circle-2"></i>Închide</button>` : ""}
           <button class="soft-button" data-log-task="${logItem.id}"><i data-lucide="copy-plus"></i>Task</button>
-          ${deleteButton("log", logItem.id, `logul ${logItem.id}`, "danger-button")}
+          ${deleteButton("log", logItem.id, `logul ${logItem.id}`, "danger-button", logItem)}
         </div>
       </article>
     `;
@@ -1830,6 +1879,7 @@
         visibility: data.get("visibility"),
         status: data.has("needsFollowUp") ? "Follow-up" : "Nou",
         submittedAt: new Date().toISOString(),
+        createdBy: currentAuthUserId(),
       };
       state.logs.unshift(logItem);
       await tryRemote("Logul", () => remoteInsert("operational_logs", toLogRow(logItem)));
@@ -1880,6 +1930,7 @@
       relatedLogId: logItem.id,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      createdBy: currentAuthUserId(),
     };
     state.tasks.unshift(created);
     logItem.relatedTaskId = created.id;
@@ -2020,6 +2071,7 @@
         validationStatus: "În așteptare",
         validatedBy: "",
         createdAt: new Date().toISOString(),
+        createdBy: currentAuthUserId(),
       };
       state.timeEntries.unshift(entry);
       state.clock = null;
@@ -2102,6 +2154,7 @@
       validationStatus: "În așteptare",
       validatedBy: "",
       createdAt: new Date().toISOString(),
+      createdBy: currentAuthUserId(),
     };
     state.timeEntries.unshift(entry);
     await tryRemote("Pontajul", () => remoteInsert("time_entries", toTimeEntryRow(entry)));
@@ -2130,7 +2183,7 @@
           <span class="status-pill ${statusClass(entry.validationStatus)}">${escapeHtml(entry.validationStatus)}</span>
           ${entry.validationStatus !== "Acceptat" ? `<button class="soft-button" data-time-accept="${entry.id}"><i data-lucide="badge-check"></i>Acceptă</button>` : ""}
           ${entry.validationStatus !== "Necesită clarificare" ? `<button class="ghost-button" data-time-clarify="${entry.id}"><i data-lucide="circle-help"></i>Clarifică</button>` : ""}
-          ${deleteButton("time", entry.id, `pontajul ${entry.id}`, "danger-button")}
+          ${deleteButton("time", entry.id, `pontajul ${entry.id}`, "danger-button", entry)}
         </div>
       </article>
     `;
@@ -2237,7 +2290,7 @@
           ${memberItem.safePerson ? `<span class="badge teal">Safe Person</span>` : ""}
           <span class="tag">${escapeHtml(memberItem.accessLevel)}</span>
           <button class="ghost-button" data-member-detail="${memberItem.id}"><i data-lucide="eye"></i>Detalii</button>
-          ${seedMemberIds.has(memberItem.id) ? "" : deleteButton("member", memberItem.id, `membrul ${memberItem.name}`, "danger-button")}
+          ${seedMemberIds.has(memberItem.id) ? "" : deleteButton("member", memberItem.id, `membrul ${memberItem.name}`, "danger-button", memberItem)}
         </span>
       </article>
     `;
@@ -2334,7 +2387,7 @@
         <p><strong>Status:</strong> ${escapeHtml(memberItem.status)}</p>
       </section>
       <div class="button-row" style="margin-top:14px">
-        ${deleteButton("member", memberItem.id, `membrul ${memberItem.name}`, "danger-button")}
+        ${deleteButton("member", memberItem.id, `membrul ${memberItem.name}`, "danger-button", memberItem)}
       </div>
     `);
   }
@@ -2394,7 +2447,7 @@
         <span class="button-row">
           <span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status)}</span>
           <button class="ghost-button" data-registry-detail="${entry.id}"><i data-lucide="eye"></i>Detalii</button>
-          ${deleteButton("registry", entry.id, `numărul ${entry.registryNumber}`, "danger-button")}
+          ${deleteButton("registry", entry.id, `numărul ${entry.registryNumber}`, "danger-button", entry)}
         </span>
       </article>
     `;
@@ -2490,7 +2543,7 @@
         sequence: nextSequence,
         ...draft,
         status: "Înregistrat",
-        createdBy: activeAccount()?.memberId || "",
+        createdBy: currentAuthUserId(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -2559,7 +2612,7 @@
         </div>
       </form>
       <div class="button-row" style="margin-top:14px">
-        ${deleteButton("registry", entry.id, `numărul ${entry.registryNumber}`, "danger-button")}
+        ${deleteButton("registry", entry.id, `numărul ${entry.registryNumber}`, "danger-button", entry)}
       </div>
     `);
 
@@ -2670,7 +2723,7 @@
         </div>
         <div class="button-row">
           <button class="ghost-button" data-risk-close="${riskItem.id}"><i data-lucide="check"></i>Monitorizat</button>
-          ${deleteButton("risk", riskItem.id, `riscul ${riskItem.id}`, "danger-button")}
+          ${deleteButton("risk", riskItem.id, `riscul ${riskItem.id}`, "danger-button", riskItem)}
         </div>
       </article>
     `;
@@ -2733,6 +2786,7 @@
         visibility: data.get("visibility"),
         status: "Deschis",
         createdAt: new Date().toISOString(),
+        createdBy: currentAuthUserId(),
       };
       state.risks.unshift(riskItem);
       await tryRemote("Riscul", () => remoteInsert("risks", toRiskRow(riskItem)));
@@ -2808,7 +2862,7 @@
         <a class="soft-button" href="${escapeHtml(fileItem.driveUrl)}" target="_blank" rel="noreferrer">
           <i data-lucide="external-link"></i>Deschide
         </a>
-        ${deleteButton("file", fileItem.id, `fișierul ${fileItem.id}`, "danger-button")}
+        ${deleteButton("file", fileItem.id, `fișierul ${fileItem.id}`, "danger-button", fileItem)}
       </article>
     `;
   }
@@ -2859,6 +2913,7 @@
         fileType: data.get("fileType"),
         driveUrl: data.get("driveUrl").trim(),
         uploadedAt: new Date().toISOString(),
+        createdBy: currentAuthUserId(),
       };
       state.files.unshift(fileItem);
       await tryRemote("Fisierul", () => remoteInsert("files", toFileRow(fileItem)));
@@ -3046,7 +3101,7 @@
           <i data-lucide="${account.status === "Suspendat" ? "unlock" : "lock"}"></i>
           ${account.status === "Suspendat" ? "Activează" : "Suspendă"}
         </button>
-        ${protectedUsernames.has(account.username) ? "" : deleteButton("account", account.username, `contul ${account.username}`, "danger-button")}
+        ${protectedUsernames.has(account.username) ? "" : deleteButton("account", account.username, `contul ${account.username}`, "danger-button", account)}
       </article>
     `;
   }
@@ -3208,6 +3263,7 @@
         relatedLogId: defaults.relatedLogId || "",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        createdBy: currentAuthUserId(),
       };
       state.tasks.unshift(taskItem);
       await tryRemote("Taskul", () => remoteInsert("tasks", toTaskRow(taskItem)));
@@ -3251,7 +3307,7 @@
       </section>
       <div class="button-row" style="margin-top:14px">
         ${statuses.map((status) => `<button class="ghost-button" data-task-status="${status}" data-task="${taskId}">${escapeHtml(status)}</button>`).join("")}
-        ${deleteButton("task", taskItem.id, `taskul ${taskItem.id}`, "danger-button")}
+        ${deleteButton("task", taskItem.id, `taskul ${taskItem.id}`, "danger-button", taskItem)}
       </div>
     `);
 
