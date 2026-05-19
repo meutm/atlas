@@ -25,6 +25,7 @@
   ];
   let realtimeChannel = null;
   let realtimeReloadTimer = null;
+  let clockTicker = null;
   const seedMemberIds = new Set(Array.from({ length: 22 }, (_, index) => `MEM-${String(index + 1).padStart(4, "0")}`));
   const protectedUsernames = new Set(["admin.meu"]);
 
@@ -98,6 +99,7 @@
     logStatus: "Toate",
     memberDepartment: "Toate",
     timeStatus: "Toate",
+    timeScope: "Luna aceasta",
   };
 
   const view = document.getElementById("view");
@@ -460,6 +462,18 @@
     return state.members.filter((memberItem) => memberItem.department === accountDepartment() || memberItem.id === account.memberId);
   }
 
+  function timeDefaultMemberId() {
+    return activeAccount()?.memberId || "MEM-0005";
+  }
+
+  function timeDefaultDepartment(memberId = timeDefaultMemberId()) {
+    return state.members.find((memberItem) => memberItem.id === memberId)?.department || accountDepartment() || "Executiv & Tehnologie";
+  }
+
+  function canValidateTime() {
+    return ["Admin", "Director", "HR"].includes(activeAccount()?.role);
+  }
+
   function renderAuth() {
     const account = activeAccount();
     loginScreen.hidden = Boolean(account);
@@ -592,6 +606,24 @@
         .map((memberItem) => `<option value="${memberItem.id}" ${memberItem.id === selected ? "selected" : ""}>${escapeHtml(memberItem.name)}</option>`)
         .join("")
     );
+  }
+
+  function timeMemberOptions(selected) {
+    const account = activeAccount();
+    const members =
+      account && !["Admin", "Director", "HR"].includes(account.role)
+        ? visibleMembers().filter((memberItem) => memberItem.status === "Activ")
+        : state.members.filter((memberItem) => memberItem.status === "Activ");
+    return members
+      .map((memberItem) => `<option value="${memberItem.id}" ${memberItem.id === selected ? "selected" : ""}>${escapeHtml(memberItem.name)}</option>`)
+      .join("");
+  }
+
+  function timeDepartmentOptions(selected) {
+    const account = activeAccount();
+    if (!account || ["Admin", "Director", "HR"].includes(account.role)) return departmentOptions(selected);
+    const department = accountDepartment() || selected;
+    return optionList([department], department);
   }
 
   function taskOptions(selected, includeEmpty) {
@@ -1387,6 +1419,7 @@
     const route = routes.some((item) => item.id === currentRoute()) ? currentRoute() : firstAllowedRoute();
     document.body.classList.remove("sidebar-open");
     renderNav();
+    if (route !== "time") stopClockTicker();
 
     if (route === "dashboard") renderDashboard();
     if (route === "board") renderBoard();
@@ -1950,10 +1983,13 @@
   }
 
   function renderTime() {
-    const scopedTime = visibleTimeEntries();
+    const visibleEntries = visibleTimeEntries();
+    const scopedTime = filterTimeScope(visibleEntries);
     const filteredEntries = scopedTime.filter((entry) => filters.timeStatus === "Toate" || entry.validationStatus === filters.timeStatus);
     const pending = scopedTime.filter((entry) => entry.validationStatus === "În așteptare");
     const accepted = scopedTime.filter((entry) => entry.validationStatus === "Acceptat");
+    const todayHours = sum(visibleEntries.filter((entry) => isToday(entry.date)), (entry) => entry.hours);
+    const weekHours = sum(visibleEntries.filter((entry) => isThisWeek(entry.date)), (entry) => entry.hours);
     const totalHours = sum(scopedTime, (entry) => entry.hours);
     const acceptedHours = sum(accepted, (entry) => entry.hours);
     const activeClock = state.clock;
@@ -1962,38 +1998,49 @@
       ${pageHead(
         "Pontaj",
         "Timp, contribuții și validări",
-        "Înregistrări zilnice, sesiuni clock-in/clock-out și validare pentru HR/directori.",
+        "Timer live, pontaj manual și validare curată pentru orele lucrate în MEU Atlas.",
         `<button class="ghost-button" data-action="export-time"><i data-lucide="download"></i>Export</button>`,
       )}
 
-      <div class="grid cols-3">
-        ${metric("Total ore", totalHours.toFixed(1), "timer", "Toate înregistrările")}
-        ${metric("Ore validate", acceptedHours.toFixed(1), "badge-check", "Acceptate de HR")}
-        ${metric("În așteptare", pending.length, "hourglass", "Necesită verificare")}
+      <div class="grid cols-4">
+        ${metric("Azi", todayHours.toFixed(1), "sun", "Ore înregistrate astăzi")}
+        ${metric("Săptămâna", weekHours.toFixed(1), "calendar-range", "Vizibile pentru contul tău")}
+        ${metric("Validate", acceptedHours.toFixed(1), "badge-check", "În filtrul curent")}
+        ${metric("De verificat", pending.length, "hourglass", "În așteptare")}
       </div>
 
-      <div class="split-layout" style="margin-top:16px">
-        <section class="panel logo-watermark">
+      <div class="time-console" style="margin-top:16px">
+        <section class="panel logo-watermark clock-card ${activeClock ? "is-running" : ""}">
           <div class="section-title">
-            <h2>Sesiune rapidă</h2>
-            <img class="mini-logo" src="${LOGO}" alt="" aria-hidden="true" />
+            <h2>Timer pontaj</h2>
+            <span class="badge ${activeClock ? "green" : "blue"}">${activeClock ? "Activ" : "Pregătit"}</span>
           </div>
+
           <div class="clock-panel">
-            <div>
-              <p class="meta">${activeClock ? `Pornit de ${escapeHtml(memberName(activeClock.memberId))}` : "Nicio sesiune activă"}</p>
-              <div class="clock-time">${activeClock ? elapsedClock(activeClock.start) : "00:00"}</div>
+            <div class="clock-face">
+              <p class="meta">${activeClock ? "Sesiune în desfășurare" : "Alege contextul și pornește timerul"}</p>
+              <div class="clock-time" data-clock-time>${activeClock ? elapsedClock(activeClock.start) : "00:00:00"}</div>
+              <div class="clock-context">
+                ${activeClock ? clockContext(activeClock) : `<span class="tag">${escapeHtml(memberName(timeDefaultMemberId()))}</span><span class="tag">${escapeHtml(timeDefaultDepartment())}</span>`}
+              </div>
             </div>
-            <button class="${activeClock ? "danger-button" : "primary-button"}" id="clockToggle">
-              <i data-lucide="${activeClock ? "square" : "play"}"></i>
-              ${activeClock ? "Oprește" : "Pornește"}
-            </button>
+            <div class="clock-actions">
+              <button class="${activeClock ? "danger-button" : "primary-button"}" id="clockToggle">
+                <i data-lucide="${activeClock ? "square" : "play"}"></i>
+                ${activeClock ? "Oprește și salvează" : "Pornește"}
+              </button>
+              ${activeClock ? `<button class="ghost-button" id="clockCancel"><i data-lucide="x"></i>Anulează</button>` : ""}
+            </div>
           </div>
-          ${!activeClock ? clockStartForm() : ""}
+
+          ${activeClock ? activeClockSummary(activeClock) : clockStartForm()}
+          ${!activeClock ? quickClockPresets() : ""}
         </section>
 
-        <section class="panel">
+        <section class="panel manual-time-card">
           <div class="section-title">
-            <h2>Adaugă pontaj</h2>
+            <h2>Pontaj manual</h2>
+            <span class="badge blue">Corecție rapidă</span>
           </div>
           ${timeForm()}
         </section>
@@ -2002,7 +2049,10 @@
       <section class="panel" style="margin-top:16px">
         <div class="section-title">
           <h2>Registru pontaj</h2>
-          <select id="timeStatusFilter">${optionList(["Toate", "În așteptare", "Acceptat", "Necesită clarificare"], filters.timeStatus)}</select>
+          <div class="filter-bar">
+            <select id="timeScopeFilter">${optionList(["Azi", "Săptămâna aceasta", "Luna aceasta", "Toate"], filters.timeScope)}</select>
+            <select id="timeStatusFilter">${optionList(["Toate", "În așteptare", "Acceptat", "Necesită clarificare"], filters.timeStatus)}</select>
+          </div>
         </div>
         <div class="table-head time-head">
           <span>Membru</span><span>Ore</span><span>Activitate</span><span>Validare</span>
@@ -2015,20 +2065,98 @@
 
     view.querySelector('[data-action="export-time"]').addEventListener("click", () => exportJson("meu-atlas-pontaj.json", visibleTimeEntries()));
     view.querySelector("#timeEntryForm").addEventListener("submit", handleTimeSubmit);
+    view.querySelector("#timeScopeFilter").addEventListener("change", (event) => {
+      filters.timeScope = event.target.value;
+      renderTime();
+    });
     view.querySelector("#timeStatusFilter").addEventListener("change", (event) => {
       filters.timeStatus = event.target.value;
       renderTime();
     });
     view.querySelector("#clockToggle").addEventListener("click", handleClockToggle);
+    view.querySelector("#clockCancel")?.addEventListener("click", handleClockCancel);
+    view.querySelectorAll("[data-clock-preset]").forEach((button) => {
+      button.addEventListener("click", () => startClockFromPreset(button.dataset.clockPreset));
+    });
     attachTimeValidation();
+    setupClockTicker();
+  }
+
+  function isToday(value) {
+    return value === new Date().toISOString().slice(0, 10);
+  }
+
+  function isThisWeek(value) {
+    if (!value) return false;
+    const target = new Date(value);
+    const today = new Date();
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const end = new Date(start);
+    end.setDate(start.getDate() + 7);
+    return target >= start && target < end;
+  }
+
+  function isThisMonth(value) {
+    if (!value) return false;
+    const target = new Date(value);
+    const today = new Date();
+    return target.getFullYear() === today.getFullYear() && target.getMonth() === today.getMonth();
+  }
+
+  function filterTimeScope(entries) {
+    if (filters.timeScope === "Azi") return entries.filter((entry) => isToday(entry.date));
+    if (filters.timeScope === "Săptămâna aceasta") return entries.filter((entry) => isThisWeek(entry.date));
+    if (filters.timeScope === "Luna aceasta") return entries.filter((entry) => isThisMonth(entry.date));
+    return entries;
+  }
+
+  function clockContext(clock) {
+    return `
+      <span class="tag">${escapeHtml(memberName(clock.memberId))}</span>
+      <span class="tag">${escapeHtml(clock.department)}</span>
+      <span class="tag">${escapeHtml(clock.activity)}</span>
+      ${clock.relatedTaskId ? `<span class="tag">${escapeHtml(clock.relatedTaskId)}</span>` : ""}
+    `;
+  }
+
+  function activeClockSummary(clock) {
+    return `
+      <div class="active-clock-summary">
+        <div>
+          <span class="meta">Pornit la</span>
+          <strong>${formatDateTime(clock.start)}</strong>
+        </div>
+        <div>
+          <span class="meta">Se va salva ca</span>
+          <strong data-clock-duration>${elapsedHours(clock.start).toFixed(2)} ore</strong>
+        </div>
+        <div>
+          <span class="meta">Notă</span>
+          <strong>${escapeHtml(clock.notes || "Sesiune timer")}</strong>
+        </div>
+      </div>
+    `;
+  }
+
+  function quickClockPresets() {
+    const presets = ["Ședință", "Administrativ", "Comunicare", "Recrutare"];
+    return `
+      <div class="time-presets">
+        ${presets.map((activity) => `<button class="ghost-button" data-clock-preset="${escapeHtml(activity)}"><i data-lucide="zap"></i>${escapeHtml(activity)}</button>`).join("")}
+      </div>
+    `;
   }
 
   function clockStartForm() {
+    const memberId = timeDefaultMemberId();
+    const department = timeDefaultDepartment(memberId);
     return `
-      <form id="clockStartForm" class="form-grid" style="margin-top:14px">
+      <form id="clockStartForm" class="form-grid compact-clock-form" style="margin-top:14px">
         <div class="field">
           <label>Membru</label>
-          <select name="memberId">${memberOptions("MEM-0005")}</select>
+          <select name="memberId">${timeMemberOptions(memberId)}</select>
         </div>
         <div class="field">
           <label>Activitate</label>
@@ -2036,11 +2164,15 @@
         </div>
         <div class="field">
           <label>Departament</label>
-          <select name="department">${departmentOptions("Executiv & Tehnologie")}</select>
+          <select name="department">${timeDepartmentOptions(department)}</select>
         </div>
         <div class="field">
           <label>Task</label>
           <select name="relatedTaskId">${taskOptions("", true)}</select>
+        </div>
+        <div class="field full">
+          <label>Notă scurtă</label>
+          <input name="notes" placeholder="Ex: pregătire materiale, call parteneri" />
         </div>
       </form>
     `;
@@ -2048,16 +2180,39 @@
 
   function elapsedClock(start) {
     const diff = Math.max(0, Date.now() - new Date(start).getTime());
-    const totalMinutes = Math.floor(diff / 60000);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    const totalSeconds = Math.floor(diff / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function elapsedHours(start) {
+    const rawHours = Math.max(0, (Date.now() - new Date(start).getTime()) / 3600000);
+    return Math.max(0.25, Math.round(rawHours * 4) / 4);
+  }
+
+  function stopClockTicker() {
+    if (clockTicker) clearInterval(clockTicker);
+    clockTicker = null;
+  }
+
+  function setupClockTicker() {
+    stopClockTicker();
+    if (!state.clock || currentRoute() !== "time") return;
+    const updateClock = () => {
+      const clockNode = view.querySelector("[data-clock-time]");
+      const durationNode = view.querySelector("[data-clock-duration]");
+      if (clockNode) clockNode.textContent = elapsedClock(state.clock.start);
+      if (durationNode) durationNode.textContent = `${elapsedHours(state.clock.start).toFixed(2)} ore`;
+    };
+    updateClock();
+    clockTicker = setInterval(updateClock, 1000);
   }
 
   async function handleClockToggle() {
     if (state.clock) {
-      const start = new Date(state.clock.start);
-      const hours = Math.max(0.25, Math.round(((Date.now() - start.getTime()) / 3600000) * 4) / 4);
+      const hours = elapsedHours(state.clock.start);
       const entry = {
         id: nextId("TIME", state.timeEntries),
         memberId: state.clock.memberId,
@@ -2067,14 +2222,15 @@
         relatedTaskId: state.clock.relatedTaskId,
         relatedLogId: "",
         hours,
-        notes: "Sesiune clock-in/clock-out",
+        notes: state.clock.notes || "Sesiune timer",
         validationStatus: "În așteptare",
         validatedBy: "",
         createdAt: new Date().toISOString(),
-        createdBy: currentAuthUserId(),
+        createdBy: state.clock.createdBy || currentAuthUserId(),
       };
       state.timeEntries.unshift(entry);
       state.clock = null;
+      stopClockTicker();
       await tryRemote("Pontajul", () => remoteInsert("time_entries", toTimeEntryRow(entry)));
       saveState("Sesiune pontaj închisă");
       renderTime();
@@ -2084,24 +2240,58 @@
 
     const form = view.querySelector("#clockStartForm");
     const data = new FormData(form);
+    const memberId = data.get("memberId") || timeDefaultMemberId();
     state.clock = {
-      memberId: data.get("memberId"),
-      department: data.get("department"),
+      memberId,
+      department: data.get("department") || timeDefaultDepartment(memberId),
       activity: data.get("activity"),
       relatedTaskId: data.get("relatedTaskId"),
+      notes: data.get("notes").trim(),
       start: new Date().toISOString(),
+      createdBy: currentAuthUserId(),
+      startedBy: activeAccount()?.username || "",
     };
     saveState("Sesiune pontaj pornită");
     renderTime();
     toast("Sesiune pornită", `Pontaj activ pentru ${memberName(state.clock.memberId)}.`);
   }
 
+  function startClockFromPreset(activity) {
+    if (state.clock) return;
+    const memberId = timeDefaultMemberId();
+    state.clock = {
+      memberId,
+      department: timeDefaultDepartment(memberId),
+      activity,
+      relatedTaskId: "",
+      notes: `Start rapid: ${activity}`,
+      start: new Date().toISOString(),
+      createdBy: currentAuthUserId(),
+      startedBy: activeAccount()?.username || "",
+    };
+    saveState("Sesiune pontaj pornită rapid");
+    renderTime();
+    toast("Timer pornit", `${activity} pentru ${memberName(memberId)}.`);
+  }
+
+  function handleClockCancel() {
+    if (!state.clock) return;
+    if (!confirm("Anulezi sesiunea activă fără să salvezi pontaj?")) return;
+    state.clock = null;
+    stopClockTicker();
+    saveState("Sesiune pontaj anulată");
+    renderTime();
+    toast("Sesiune anulată", "Nu s-a salvat niciun pontaj.");
+  }
+
   function timeForm() {
+    const memberId = timeDefaultMemberId();
+    const department = timeDefaultDepartment(memberId);
     return `
       <form id="timeEntryForm" class="form-grid">
         <div class="field">
           <label>Membru</label>
-          <select name="memberId" required>${memberOptions("MEM-0005")}</select>
+          <select name="memberId" required>${timeMemberOptions(memberId)}</select>
         </div>
         <div class="field">
           <label>Data</label>
@@ -2109,7 +2299,7 @@
         </div>
         <div class="field">
           <label>Departament</label>
-          <select name="department" required>${departmentOptions("Executiv & Tehnologie")}</select>
+          <select name="department" required>${timeDepartmentOptions(department)}</select>
         </div>
         <div class="field">
           <label>Activitate</label>
@@ -2129,7 +2319,7 @@
         </div>
         <div class="field full">
           <label>Notițe</label>
-          <textarea name="notes" placeholder="Rezumat scurt al activității"></textarea>
+          <textarea name="notes" placeholder="Ce ai lucrat, în 1-2 propoziții"></textarea>
         </div>
         <div class="field full">
           <button class="primary-button" type="submit"><i data-lucide="plus"></i>Adaugă pontaj</button>
@@ -2141,15 +2331,21 @@
   async function handleTimeSubmit(event) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const hours = Number(data.get("hours"));
+    if (!Number.isFinite(hours) || hours <= 0) {
+      toast("Ore invalide", "Pontajul trebuie să aibă minimum 0.25 ore.");
+      return;
+    }
+    const memberId = data.get("memberId") || timeDefaultMemberId();
     const entry = {
       id: nextId("TIME", state.timeEntries),
-      memberId: data.get("memberId"),
+      memberId,
       date: data.get("date"),
-      department: data.get("department"),
+      department: data.get("department") || timeDefaultDepartment(memberId),
       activity: data.get("activity"),
       relatedTaskId: data.get("relatedTaskId"),
       relatedLogId: data.get("relatedLogId"),
-      hours: Number(data.get("hours")),
+      hours,
       notes: data.get("notes").trim(),
       validationStatus: "În așteptare",
       validatedBy: "",
@@ -2172,6 +2368,7 @@
             <span>${formatDate(entry.date)}</span>
             <span>${escapeHtml(entry.department)}</span>
             ${entry.relatedTaskId ? `<span>${escapeHtml(entry.relatedTaskId)}</span>` : ""}
+            ${entry.createdAt ? `<span>${formatDateTime(entry.createdAt)}</span>` : ""}
           </div>
         </div>
         <strong>${Number(entry.hours).toFixed(2)}</strong>
@@ -2181,8 +2378,8 @@
         </div>
         <div class="button-row">
           <span class="status-pill ${statusClass(entry.validationStatus)}">${escapeHtml(entry.validationStatus)}</span>
-          ${entry.validationStatus !== "Acceptat" ? `<button class="soft-button" data-time-accept="${entry.id}"><i data-lucide="badge-check"></i>Acceptă</button>` : ""}
-          ${entry.validationStatus !== "Necesită clarificare" ? `<button class="ghost-button" data-time-clarify="${entry.id}"><i data-lucide="circle-help"></i>Clarifică</button>` : ""}
+          ${canValidateTime() && entry.validationStatus !== "Acceptat" ? `<button class="soft-button" data-time-accept="${entry.id}"><i data-lucide="badge-check"></i>Acceptă</button>` : ""}
+          ${canValidateTime() && entry.validationStatus !== "Necesită clarificare" ? `<button class="ghost-button" data-time-clarify="${entry.id}"><i data-lucide="circle-help"></i>Clarifică</button>` : ""}
           ${deleteButton("time", entry.id, `pontajul ${entry.id}`, "danger-button", entry)}
         </div>
       </article>

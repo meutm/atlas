@@ -104,7 +104,8 @@ body.theme-dark .field input,
 body.theme-dark .field select,
 body.theme-dark .field textarea,
 body.theme-dark .kanban-column,
-body.theme-dark .account-summary div {
+body.theme-dark .account-summary div,
+body.theme-dark .active-clock-summary div {
   background: #0f172a;
   border-color: var(--line);
   color: var(--ink);
@@ -1217,17 +1218,87 @@ h3 {
   pointer-events: none;
 }
 
+.time-console {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(0, 1.05fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.clock-card {
+  min-height: 100%;
+}
+
+.clock-card.is-running {
+  border-color: rgba(22, 132, 95, 0.34);
+  box-shadow: 0 18px 44px rgba(22, 132, 95, 0.1);
+}
+
 .clock-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, auto);
   align-items: center;
   gap: 16px;
 }
 
+.clock-face {
+  display: grid;
+  gap: 8px;
+}
+
 .clock-time {
-  font-size: 34px;
+  font-size: 44px;
   font-weight: 900;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock-context,
+.clock-actions,
+.time-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.clock-actions {
+  justify-content: flex-end;
+}
+
+.time-presets {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.active-clock-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.active-clock-summary div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.active-clock-summary strong {
+  font-size: 13px;
+}
+
+.manual-time-card textarea {
+  min-height: 72px;
+}
+
+.compact-clock-form {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 
 .folder-tree {
@@ -1645,6 +1716,7 @@ h3 {
   .page-head,
   .board-toolbar,
   .clock-panel,
+  .time-console,
   .log-row,
   .member-row,
   .time-row,
@@ -1660,7 +1732,8 @@ h3 {
   .grid.cols-4,
   .access-grid,
   .account-grid,
-  .account-summary {
+  .account-summary,
+  .active-clock-summary {
     grid-template-columns: 1fr;
   }
 
