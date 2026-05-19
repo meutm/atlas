@@ -2020,8 +2020,8 @@
             <div class="clock-face">
               <p class="meta">${activeClock ? "Sesiune în desfășurare" : "Alege contextul și pornește timerul"}</p>
               <div class="clock-time" data-clock-time>${activeClock ? elapsedClock(activeClock.start) : "00:00:00"}</div>
-              <div class="clock-context">
-                ${activeClock ? clockContext(activeClock) : `<span class="tag">${escapeHtml(memberName(timeDefaultMemberId()))}</span><span class="tag">${escapeHtml(timeDefaultDepartment())}</span>`}
+              <div class="clock-context" data-clock-preview>
+                ${activeClock ? clockContext(activeClock) : clockPreviewContext(timeDefaultMemberId(), timeDefaultDepartment(), "Administrativ", "")}
               </div>
             </div>
             <div class="clock-actions">
@@ -2078,6 +2078,7 @@
     view.querySelectorAll("[data-clock-preset]").forEach((button) => {
       button.addEventListener("click", () => startClockFromPreset(button.dataset.clockPreset));
     });
+    bindClockPreview();
     attachTimeValidation();
     setupClockTicker();
   }
@@ -2113,12 +2114,35 @@
   }
 
   function clockContext(clock) {
+    return clockPreviewContext(clock.memberId, clock.department, clock.activity, clock.relatedTaskId);
+  }
+
+  function clockPreviewContext(memberId, department, activity, relatedTaskId) {
     return `
-      <span class="tag">${escapeHtml(memberName(clock.memberId))}</span>
-      <span class="tag">${escapeHtml(clock.department)}</span>
-      <span class="tag">${escapeHtml(clock.activity)}</span>
-      ${clock.relatedTaskId ? `<span class="tag">${escapeHtml(clock.relatedTaskId)}</span>` : ""}
+      <span class="tag">${escapeHtml(memberName(memberId))}</span>
+      <span class="tag">${escapeHtml(department || timeDefaultDepartment(memberId))}</span>
+      <span class="tag">${escapeHtml(activity || "Administrativ")}</span>
+      ${relatedTaskId ? `<span class="tag">${escapeHtml(relatedTaskId)}</span>` : ""}
     `;
+  }
+
+  function bindClockPreview() {
+    const form = view.querySelector("#clockStartForm");
+    const preview = view.querySelector("[data-clock-preview]");
+    if (!form || !preview || state.clock) return;
+    const updatePreview = () => {
+      const data = new FormData(form);
+      const memberId = data.get("memberId") || timeDefaultMemberId();
+      const department = data.get("department") || timeDefaultDepartment(memberId);
+      const activity = data.get("activity") || "Administrativ";
+      const relatedTaskId = data.get("relatedTaskId") || "";
+      preview.innerHTML = clockPreviewContext(memberId, department, activity, relatedTaskId);
+    };
+    form.querySelectorAll("select, input").forEach((field) => {
+      field.addEventListener("input", updatePreview);
+      field.addEventListener("change", updatePreview);
+    });
+    updatePreview();
   }
 
   function activeClockSummary(clock) {
