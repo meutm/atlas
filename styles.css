@@ -86,6 +86,7 @@ body.theme-dark .log-row,
 body.theme-dark .modal,
 body.theme-dark .toast,
 body.theme-dark .account-card,
+body.theme-dark .registry-row,
 body.theme-dark .access-tile,
 body.theme-dark .phase,
 body.theme-dark .demo-account {
@@ -1146,6 +1147,30 @@ h3 {
   grid-template-columns: minmax(0, 1.1fr) minmax(180px, 0.6fr) auto;
 }
 
+.registry-list {
+  display: grid;
+  gap: 10px;
+}
+
+.registry-row {
+  min-height: 84px;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.2fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+}
+
+.registry-row:hover {
+  border-color: #b8c7da;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
 .table-head {
   display: grid;
   padding: 0 12px 8px;
@@ -1614,7 +1639,8 @@ h3 {
   .member-row,
   .time-row,
   .risk-row,
-  .file-row {
+  .file-row,
+  .registry-row {
     grid-template-columns: 1fr;
   }
 

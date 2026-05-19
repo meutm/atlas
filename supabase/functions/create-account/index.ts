@@ -14,8 +14,8 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? readDefaultKey("SUPABASE_PUBLISHABLE_KEYS");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? readDefaultKey("SUPABASE_SECRET_KEYS");
 
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
       throw new Error("Missing Supabase environment variables.");
@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
     const username = String(body.username || "").trim().toLowerCase();
     const password = String(body.password || "");
     const displayName = String(body.name || "").trim();
-    const role = String(body.role || "Membru");
+    const role = String(body.role || "Head");
     const memberId = body.memberId || null;
     const departmentScope = String(body.scope || "Comunicare");
 
@@ -98,4 +98,16 @@ function json(payload: unknown, status = 200) {
       "Content-Type": "application/json",
     },
   });
+}
+
+function readDefaultKey(envName: string) {
+  try {
+    const raw = Deno.env.get(envName);
+    if (!raw) return undefined;
+    const keys = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof keys.default === "string") return keys.default;
+    return Object.values(keys).find((value): value is string => typeof value === "string");
+  } catch {
+    return undefined;
+  }
 }

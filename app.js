@@ -11,6 +11,20 @@
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3cnJ0Z25zc2x5cXV5amFha3diIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkxMjU2NTQsImV4cCI6MjA5NDcwMTY1NH0.a0uoOHkcIhyezaQWhl7obSd5lKoBWuFVtQLMiw-TYgo";
   const USERNAME_DOMAIN = "meu-atlas.local";
   const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const realtimeTables = [
+    "members",
+    "profiles",
+    "role_assignments",
+    "tasks",
+    "operational_logs",
+    "time_entries",
+    "risks",
+    "files",
+    "registry_entries",
+    "registry_history",
+  ];
+  let realtimeChannel = null;
+  let realtimeReloadTimer = null;
 
   const defaultAccounts = [
     { username: "admin.meu", password: "Atlas2026!", name: "Admin MEU", role: "Admin", memberId: "MEM-0005", scope: "Toate departamentele" },
@@ -18,7 +32,7 @@
     { username: "hr.meu", password: "HR2026!", name: "HR MEU", role: "HR", memberId: "MEM-0011", scope: "Resurse Umane" },
     { username: "safe.meu", password: "Safe2026!", name: "Safe Person", role: "Safe Person", memberId: "MEM-0015", scope: "Restricționat" },
     { username: "logistica.meu", password: "Logistica2026!", name: "Coordonator Logistică", role: "Coordonator", memberId: "MEM-0006", scope: "Logistică" },
-    { username: "membru.meu", password: "Membru2026!", name: "Membru MEU", role: "Membru", memberId: "MEM-0020", scope: "Comunicare" },
+    { username: "head.meu", password: "Head2026!", name: "Head MEU", role: "Head", memberId: "MEM-0020", scope: "Comunicare" },
   ];
 
   const departments = [
@@ -64,9 +78,10 @@
 
   const routes = [
     { id: "dashboard", label: "Panou executiv", icon: "layout-dashboard", roles: ["Admin", "Director", "HR", "Safe Person", "Coordonator"] },
-    { id: "board", label: "Board operațional", icon: "kanban-square", roles: ["Admin", "Director", "HR", "Safe Person", "Coordonator", "Membru"] },
-    { id: "logs", label: "Raportări", icon: "message-square-text", roles: ["Admin", "Director", "HR", "Safe Person", "Coordonator", "Membru"] },
-    { id: "time", label: "Pontaj", icon: "clock-3", roles: ["Admin", "Director", "HR", "Coordonator", "Membru"] },
+    { id: "board", label: "Board operațional", icon: "kanban-square", roles: ["Admin", "Director", "HR", "Safe Person", "Coordonator", "Head", "Membru"] },
+    { id: "logs", label: "Raportări", icon: "message-square-text", roles: ["Admin", "Director", "HR", "Safe Person", "Coordonator", "Head", "Membru"] },
+    { id: "time", label: "Pontaj", icon: "clock-3", roles: ["Admin", "Director", "HR", "Coordonator", "Head", "Membru"] },
+    { id: "registry", label: "Registratură", icon: "stamp", roles: ["Admin", "Director", "HR", "Safe Person", "Coordonator", "Head", "Membru"] },
     { id: "members", label: "Membri", icon: "users", roles: ["Admin", "Director", "HR", "Coordonator"] },
     { id: "risks", label: "Risc & Compliance", icon: "shield-alert", roles: ["Admin", "Director", "HR", "Safe Person"] },
     { id: "archive", label: "Arhivă dovezi", icon: "folder-archive", roles: ["Admin", "Director", "HR", "Safe Person", "Coordonator"] },
@@ -165,6 +180,8 @@
       members,
       currentAccount: null,
       remoteReady: false,
+      registryEntries: [],
+      registryHistory: [],
       tasks: [
         task("TASK-0001", "Finalizare model pontaj pentru voluntari", "Configurare câmpuri, validări și activități standard pentru raportarea orelor.", "Resurse Umane", "MEM-0011", "În lucru", "Ridicată", offsetDate(3), false, "", ""),
         task("TASK-0002", "Confirmare program acces locații", "Obținere confirmare pentru orele de acces și persoanele de contact pe locații.", "Logistică", "MEM-0008", "În așteptare", "Critică", offsetDate(1), true, "Lipsește confirmarea finală de la contactul locației.", ""),
@@ -355,6 +372,8 @@
       roles: Array.isArray(data.roles) && data.roles.length > 2 ? data.roles : fresh.roles,
       currentAccount: data.currentAccount || null,
       remoteReady: Boolean(data.remoteReady),
+      registryEntries: Array.isArray(data.registryEntries) ? data.registryEntries : fresh.registryEntries,
+      registryHistory: Array.isArray(data.registryHistory) ? data.registryHistory : fresh.registryHistory,
     };
   }
 
@@ -537,6 +556,11 @@
     return routes.find((route) => route.id === currentRoute())?.label || "Platformă";
   }
 
+  function formatRegistryDate(dateValue) {
+    const date = dateValue ? new Date(dateValue) : new Date();
+    return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" }).format(date);
+  }
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -623,7 +647,7 @@
       department: row.department,
       role: row.primary_role,
       manager: row.manager || "",
-      accessLevel: row.access_level || "Membru",
+      accessLevel: row.access_level || "Head",
       safePerson: Boolean(row.safe_person),
       status: row.status || "Activ",
       addedAt: row.created_at || "",
@@ -727,12 +751,44 @@
     };
   }
 
+  function normalizeRegistryEntry(row) {
+    return {
+      id: row.id,
+      registryNumber: row.registry_number,
+      sequence: row.sequence_number,
+      documentDate: row.document_date,
+      title: row.title,
+      summary: row.summary || "",
+      documentType: row.document_type || "Document",
+      direction: row.direction || "Intern",
+      department: row.department || "",
+      requesterId: row.requester_id || "",
+      externalParty: row.external_party || "",
+      status: row.status || "Înregistrat",
+      fileUrl: row.file_url || "",
+      createdBy: row.created_by || "",
+      createdAt: row.created_at || "",
+      updatedAt: row.updated_at || "",
+    };
+  }
+
+  function normalizeRegistryHistory(row) {
+    return {
+      id: row.id,
+      registryEntryId: row.registry_entry_id,
+      action: row.action,
+      note: row.note || "",
+      actorId: row.actor_id || "",
+      createdAt: row.created_at || "",
+    };
+  }
+
   function normalizeProfile(row) {
     return {
       username: row.username,
       password: "",
       name: row.display_name,
-      role: row.role,
+      role: row.role === "Membru" ? "Head" : row.role,
       memberId: row.member_id || "",
       scope: row.department_scope || "",
       status: row.status || "Activ",
@@ -759,8 +815,47 @@
     state.risks = await fetchSupabaseTable("risks", normalizeRisk, state.risks);
     state.files = await fetchSupabaseTable("files", normalizeFile, state.files);
     state.accounts = await fetchSupabaseTable("profiles", normalizeProfile, state.accounts);
+    state.registryEntries = await fetchSupabaseTable("registry_entries", normalizeRegistryEntry, state.registryEntries || []);
+    state.registryHistory = await fetchSupabaseTable("registry_history", normalizeRegistryHistory, state.registryHistory || []);
     state.remoteReady = true;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  async function refreshRemoteDataSilently(reason = "Realtime update") {
+    if (!activeAccount()) return;
+    clearTimeout(realtimeReloadTimer);
+    realtimeReloadTimer = setTimeout(async () => {
+      const routeBefore = currentRoute();
+      await loadRemoteData();
+      render();
+      if (!["dashboard"].includes(routeBefore)) {
+        toast("Actualizat live", reason);
+      }
+    }, 350);
+  }
+
+  function setupRealtime() {
+    if (!supabaseClient || realtimeChannel) return;
+    realtimeChannel = supabaseClient.channel("meu-atlas-live");
+    realtimeTables.forEach((table) => {
+      realtimeChannel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table },
+        () => refreshRemoteDataSilently("Datele au fost sincronizate."),
+      );
+    });
+    realtimeChannel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        console.info("MEU Atlas realtime conectat.");
+      }
+    });
+  }
+
+  function teardownRealtime() {
+    if (supabaseClient && realtimeChannel) {
+      supabaseClient.removeChannel(realtimeChannel);
+    }
+    realtimeChannel = null;
   }
 
   async function loadProfileForUser(user) {
@@ -793,19 +888,24 @@
     }
     state.currentAccount = account;
     await loadRemoteData();
+    setupRealtime();
     saveState("Autentificare Supabase");
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ username: account.username, account, loggedAt: new Date().toISOString() }));
     return account;
   }
 
   async function restoreSupabaseSession() {
-    if (!supabaseClient || activeAccount()) return;
+    if (!supabaseClient) return;
     const { data } = await supabaseClient.auth.getSession();
-    if (!data.session?.user) return;
+    if (!data.session?.user) {
+      if (activeAccount()) setupRealtime();
+      return;
+    }
     try {
       const account = await loadProfileForUser(data.session.user);
       state.currentAccount = account;
       await loadRemoteData();
+      setupRealtime();
       sessionStorage.setItem(SESSION_KEY, JSON.stringify({ username: account.username, account, loggedAt: new Date().toISOString() }));
       render();
     } catch (error) {
@@ -915,11 +1015,45 @@
     };
   }
 
+  function toRegistryEntryRow(entry) {
+    return {
+      id: entry.id,
+      registry_number: entry.registryNumber,
+      sequence_number: entry.sequence,
+      document_date: entry.documentDate,
+      title: entry.title,
+      summary: entry.summary || "",
+      document_type: entry.documentType,
+      direction: entry.direction,
+      department: entry.department,
+      requester_id: entry.requesterId || null,
+      external_party: entry.externalParty || "",
+      status: entry.status,
+      file_url: entry.fileUrl || "",
+    };
+  }
+
+  function toRegistryHistoryRow(historyItem) {
+    return {
+      registry_entry_id: historyItem.registryEntryId,
+      action: historyItem.action,
+      note: historyItem.note || "",
+      actor_id: historyItem.actorId || null,
+    };
+  }
+
   async function remoteInsert(table, row) {
     if (!supabaseClient || !activeAccount()) return false;
     const { error } = await supabaseClient.from(table).insert(row);
     if (error) throw error;
     return true;
+  }
+
+  async function remoteRpc(name, args = {}) {
+    if (!supabaseClient || !activeAccount()) return null;
+    const { data, error } = await supabaseClient.rpc(name, args);
+    if (error) throw error;
+    return data;
   }
 
   async function remoteUpdate(table, id, patch) {
@@ -995,11 +1129,13 @@
     const openLogs = visibleLogs().filter((logItem) => !["Închis"].includes(logItem.status)).length;
     const pendingTime = visibleTimeEntries().filter((entry) => entry.validationStatus === "În așteptare").length;
     const risks = state.risks.filter((riskItem) => riskItem.status !== "Închis").length;
+    const registryOpen = (state.registryEntries || []).filter((entry) => entry.status !== "Arhivat").length;
     const counters = {
       board: openTasks,
       logs: openLogs,
       time: pendingTime,
       risks,
+      registry: registryOpen,
     };
 
     navList.innerHTML = allowedRoutes
@@ -1037,6 +1173,7 @@
     if (route === "logs") renderLogs();
     if (route === "time") renderTime();
     if (route === "members") renderMembers();
+    if (route === "registry") renderRegistry();
     if (route === "risks") renderRisks();
     if (route === "archive") renderArchive();
     if (route === "admin") renderAdmin();
@@ -1955,7 +2092,7 @@
         </div>
         <div class="field">
           <label>Nivel acces</label>
-          <select name="accessLevel">${optionList(["Membru", "Coordonator", "Manager", "Director", "Admin"], "Membru")}</select>
+          <select name="accessLevel">${optionList(["Head", "Coordonator", "Manager", "Director", "Admin"], "Head")}</select>
         </div>
         <div class="field">
           <label>Status</label>
@@ -2020,6 +2157,262 @@
         <p><strong>Status:</strong> ${escapeHtml(memberItem.status)}</p>
       </section>
     `);
+  }
+
+  function renderRegistry() {
+    const entries = [...(state.registryEntries || [])].sort((a, b) => Number(b.sequence || 0) - Number(a.sequence || 0));
+    const issuedToday = entries.filter((entry) => entry.documentDate === new Date().toISOString().slice(0, 10)).length;
+    const lastEntry = entries[0];
+
+    view.innerHTML = `
+      ${pageHead(
+        "Registratură",
+        "Registru documente MEU",
+        "Alocare controlată de numere MEUTM, cu istoric, descriere scurtă și trasabilitate.",
+        `<button class="primary-button" data-action="open-registry"><i data-lucide="stamp"></i>Număr nou</button>`,
+      )}
+
+      <div class="grid cols-3">
+        ${metric("Total înregistrări", entries.length, "archive", "Registru curent")}
+        ${metric("Astăzi", issuedToday, "calendar-check", formatRegistryDate(new Date()))}
+        ${metric("Ultimul număr", lastEntry ? lastEntry.registryNumber : "MEUTM/0000", "hash", lastEntry ? lastEntry.title : "Nicio înregistrare")}
+      </div>
+
+      <section class="panel" style="margin-top:16px">
+        <div class="section-title">
+          <h2>Istoric registratură</h2>
+          <span class="badge blue">${entries.length}</span>
+        </div>
+        <div class="registry-list">
+          ${entries.length ? entries.map(registryRow).join("") : emptyState("Nu există încă numere de înregistrare.")}
+        </div>
+      </section>
+    `;
+
+    view.querySelector('[data-action="open-registry"]').addEventListener("click", () => openRegistryModal());
+    view.querySelectorAll("[data-registry-detail]").forEach((button) => {
+      button.addEventListener("click", () => openRegistryDetails(button.dataset.registryDetail));
+    });
+  }
+
+  function registryRow(entry) {
+    return `
+      <button class="registry-row" data-registry-detail="${entry.id}">
+        <span>
+          <strong>${escapeHtml(entry.registryNumber)}</strong>
+          <span class="row-meta">
+            <span>${formatDate(entry.documentDate)}</span>
+            <span>${escapeHtml(entry.documentType)}</span>
+            <span>${escapeHtml(entry.direction)}</span>
+          </span>
+        </span>
+        <span>
+          <strong>${escapeHtml(entry.title)}</strong>
+          <span class="row-meta">${escapeHtml(entry.summary || "Fără descriere")}</span>
+        </span>
+        <span class="tag">${escapeHtml(entry.department || "General")}</span>
+        <span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status)}</span>
+      </button>
+    `;
+  }
+
+  function openRegistryModal() {
+    openModal(`
+      <h2 id="modalTitle">Număr nou de înregistrare</h2>
+      <form id="registryForm" class="form-grid">
+        <div class="field">
+          <label>Data documentului</label>
+          <input name="documentDate" type="date" value="${new Date().toISOString().slice(0, 10)}" required />
+        </div>
+        <div class="field">
+          <label>Tip document</label>
+          <select name="documentType">${optionList(["Adresă", "Contract", "Cerere", "Decizie", "Proces-verbal", "Invitație", "Dovadă", "Alt document"], "Adresă")}</select>
+        </div>
+        <div class="field">
+          <label>Direcție</label>
+          <select name="direction">${optionList(["Intrare", "Ieșire", "Intern"], "Intern")}</select>
+        </div>
+        <div class="field">
+          <label>Departament</label>
+          <select name="department">${departmentOptions(accountDepartment() || "Executiv & Tehnologie")}</select>
+        </div>
+        <div class="field full">
+          <label>Titlu document</label>
+          <input name="title" required placeholder="Ex: Adresă confirmare parteneriat" />
+        </div>
+        <div class="field full">
+          <label>Descriere pe scurt</label>
+          <textarea name="summary" required placeholder="Descriere scurtă, clară, suficientă pentru istoric"></textarea>
+        </div>
+        <div class="field">
+          <label>Solicitant / responsabil</label>
+          <select name="requesterId">${memberOptions(activeAccount()?.memberId || "MEM-0005")}</select>
+        </div>
+        <div class="field">
+          <label>Instituție / persoană externă</label>
+          <input name="externalParty" placeholder="Opțional" />
+        </div>
+        <div class="field full">
+          <label>URL document</label>
+          <input name="fileUrl" type="url" placeholder="https://drive.google.com/..." />
+        </div>
+        <div class="field full">
+          <button class="primary-button" type="submit"><i data-lucide="stamp"></i>Generează număr</button>
+        </div>
+      </form>
+    `);
+
+    document.getElementById("registryForm").addEventListener("submit", handleRegistrySubmit);
+  }
+
+  async function handleRegistrySubmit(event) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const draft = {
+      title: data.get("title").trim(),
+      summary: data.get("summary").trim(),
+      documentType: data.get("documentType"),
+      direction: data.get("direction"),
+      department: data.get("department"),
+      requesterId: data.get("requesterId"),
+      externalParty: data.get("externalParty").trim(),
+      documentDate: data.get("documentDate"),
+      fileUrl: data.get("fileUrl").trim(),
+    };
+
+    let created;
+    try {
+      created = await remoteRpc("create_registry_entry", {
+        p_title: draft.title,
+        p_summary: draft.summary,
+        p_document_type: draft.documentType,
+        p_direction: draft.direction,
+        p_department: draft.department,
+        p_requester_id: draft.requesterId || null,
+        p_external_party: draft.externalParty || "",
+        p_document_date: draft.documentDate,
+        p_file_url: draft.fileUrl || "",
+      });
+      await loadRemoteData();
+      const createdId = Array.isArray(created) ? created[0]?.id : created?.id;
+      const entry = state.registryEntries.find((item) => item.id === createdId) || normalizeRegistryEntry(Array.isArray(created) ? created[0] : created);
+      toast("Număr generat", entry.registryNumber);
+    } catch (error) {
+      console.warn(error);
+      const nextSequence = Math.max(0, ...(state.registryEntries || []).map((entry) => Number(entry.sequence || 0))) + 1;
+      const fallbackEntry = {
+        id: crypto.randomUUID(),
+        registryNumber: `MEUTM/${String(nextSequence).padStart(4, "0")}/${formatRegistryDate(draft.documentDate)}`,
+        sequence: nextSequence,
+        ...draft,
+        status: "Înregistrat",
+        createdBy: activeAccount()?.memberId || "",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      state.registryEntries.unshift(fallbackEntry);
+      state.registryHistory.unshift({
+        id: crypto.randomUUID(),
+        registryEntryId: fallbackEntry.id,
+        action: "Creat local",
+        note: "Supabase nu a generat numărul. Verifică funcția SQL create_registry_entry.",
+        actorId: activeAccount()?.memberId || "",
+        createdAt: new Date().toISOString(),
+      });
+      toast("Număr local", fallbackEntry.registryNumber);
+    }
+
+    saveState("Număr de registratură creat");
+    closeModal();
+    renderRegistry();
+  }
+
+  function openRegistryDetails(entryId) {
+    const entry = (state.registryEntries || []).find((item) => item.id === entryId);
+    if (!entry) return;
+    const history = (state.registryHistory || [])
+      .filter((item) => item.registryEntryId === entryId)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    openModal(`
+      <h2 id="modalTitle">${escapeHtml(entry.registryNumber)}</h2>
+      <p class="inline-meta">
+        <span class="tag">${escapeHtml(entry.documentType)}</span>
+        <span class="tag">${escapeHtml(entry.direction)}</span>
+        <span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status)}</span>
+      </p>
+      <section class="panel" style="margin-top:14px">
+        <h2>${escapeHtml(entry.title)}</h2>
+        <p>${escapeHtml(entry.summary)}</p>
+        <p class="row-meta">
+          <span>${formatDate(entry.documentDate)}</span>
+          <span>${escapeHtml(entry.department)}</span>
+          <span>${escapeHtml(memberName(entry.requesterId))}</span>
+          ${entry.externalParty ? `<span>${escapeHtml(entry.externalParty)}</span>` : ""}
+        </p>
+        ${entry.fileUrl ? `<a class="soft-button" href="${escapeHtml(entry.fileUrl)}" target="_blank" rel="noreferrer"><i data-lucide="external-link"></i>Deschide document</a>` : ""}
+      </section>
+      <section class="panel" style="margin-top:14px">
+        <div class="section-title">
+          <h2>Istoric</h2>
+          <span class="badge blue">${history.length}</span>
+        </div>
+        <div class="timeline">
+          ${history.length ? history.map(registryHistoryItem).join("") : `<p class="meta">Nu există evenimente suplimentare.</p>`}
+        </div>
+      </section>
+      <form id="registryHistoryForm" class="form-grid" style="margin-top:14px">
+        <div class="field">
+          <label>Status</label>
+          <select name="status">${optionList(["Înregistrat", "În lucru", "Trimis", "Primit", "Arhivat"], entry.status)}</select>
+        </div>
+        <div class="field">
+          <label>Notă istoric</label>
+          <input name="note" placeholder="Ex: transmis către partener" />
+        </div>
+        <div class="field full">
+          <button class="primary-button" type="submit"><i data-lucide="history"></i>Actualizează istoricul</button>
+        </div>
+      </form>
+    `);
+
+    document.getElementById("registryHistoryForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(event.currentTarget);
+      const newStatus = data.get("status");
+      const note = data.get("note").trim();
+      entry.status = newStatus;
+      entry.updatedAt = new Date().toISOString();
+      const historyItem = {
+        id: crypto.randomUUID(),
+        registryEntryId: entry.id,
+        action: `Status: ${newStatus}`,
+        note,
+        actorId: activeAccount()?.memberId || "",
+        createdAt: new Date().toISOString(),
+      };
+      state.registryHistory.unshift(historyItem);
+      await tryRemote("Actualizarea registraturii", async () => {
+        await remoteUpdate("registry_entries", entry.id, { status: entry.status, updated_at: entry.updatedAt });
+        await remoteInsert("registry_history", toRegistryHistoryRow(historyItem));
+        return true;
+      });
+      saveState("Registratură actualizată");
+      closeModal();
+      renderRegistry();
+    });
+
+    refreshIcons();
+  }
+
+  function registryHistoryItem(item) {
+    return `
+      <div class="timeline-item">
+        <strong>${escapeHtml(item.action)}</strong>
+        <p class="meta">${formatDateTime(item.createdAt)} · ${escapeHtml(memberName(item.actorId))}</p>
+        ${item.note ? `<p>${escapeHtml(item.note)}</p>` : ""}
+      </div>
+    `;
   }
 
   function renderRisks() {
@@ -2480,10 +2873,10 @@
         </div>
         <div class="field">
           <label>Rol acces</label>
-          <select name="role">${optionList(["Admin", "Director", "HR", "Safe Person", "Coordonator", "Membru"], "Membru")}</select>
+          <select name="role">${optionList(["Admin", "Director", "HR", "Safe Person", "Coordonator", "Head"], "Head")}</select>
         </div>
         <div class="field">
-          <label>Membru asociat</label>
+          <label>Head asociat</label>
           <select name="memberId">${memberOptions("", true)}</select>
         </div>
         <div class="field">
@@ -2512,19 +2905,22 @@
         memberId: data.get("memberId"),
         scope: data.get("scope"),
       };
-      try {
-        if (activeAccount()?.role === "Admin") {
+      if (supabaseClient) {
+        try {
           await createAccountRemote(payload);
+          await loadRemoteData();
+        } catch (error) {
+          console.warn(error);
+          toast("Contul nu a fost creat", error.message || "Verifică Edge Function create-account în Supabase.");
+          return;
         }
-      } catch (error) {
-        console.warn(error);
-        toast("Cont local creat", "Funcția live nu este încă publicată; contul rămâne local în prototip.");
+      } else {
+        state.accounts.push({
+          ...payload,
+          status: "Activ",
+        });
+        saveState("Cont creat local");
       }
-      state.accounts.push({
-        ...payload,
-        status: "Activ",
-      });
-      saveState("Cont creat");
       closeModal();
       renderAdmin();
       toast("Cont creat", `${username} poate intra în MEU Atlas.`);
@@ -2845,6 +3241,7 @@
 
   document.getElementById("logoutButton").addEventListener("click", async () => {
     if (supabaseClient) await supabaseClient.auth.signOut();
+    teardownRealtime();
     sessionStorage.removeItem(SESSION_KEY);
     state.currentAccount = null;
     saveState("Ieșire din cont");

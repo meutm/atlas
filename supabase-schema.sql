@@ -8,7 +8,7 @@ create table if not exists public.members (
   department text not null,
   primary_role text not null,
   manager text,
-  access_level text not null default 'Membru',
+  access_level text not null default 'Head',
   safe_person boolean not null default false,
   status text not null default 'Activ',
   created_at timestamptz not null default now()
@@ -18,7 +18,7 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text unique not null,
   display_name text not null,
-  role text not null check (role in ('Admin', 'Director', 'HR', 'Safe Person', 'Coordonator', 'Membru')),
+  role text not null check (role in ('Admin', 'Director', 'HR', 'Safe Person', 'Coordonator', 'Head', 'Membru')),
   member_id text references public.members(id),
   department_scope text not null default 'Comunicare',
   status text not null default 'Activ',

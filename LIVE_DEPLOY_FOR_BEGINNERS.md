@@ -194,6 +194,58 @@ Ca sa o publici, ai doua variante:
 
 Pana atunci, butonul Creeaza cont ramane disponibil in UI, dar pentru conturi reale recomand sa nu-l folosesti live pana nu publicam functia.
 
+## Partea E2 - Update-ul nou: registratura, realtime, Head
+
+Pentru varianta noua trebuie sa rulezi in Supabase inca un fisier SQL:
+
+`supabase-registry-realtime-head.sql`
+
+Il rulezi asa:
+
+1. Supabase > proiectul tau.
+2. SQL Editor.
+3. New query.
+4. Copiezi tot din `supabase-registry-realtime-head.sql`.
+5. Run.
+
+Acest update face patru lucruri importante:
+
+1. adauga modulul **Registratura**;
+2. creeaza contorul atomic pentru numere de forma `MEUTM/0001/DD.MM.YYYY`;
+3. activeaza realtime pentru task-uri, raportari, pontaj, riscuri, fisiere, membri, conturi si registratura;
+4. schimba rolul vechi `Membru` in `Head`, dar pastreaza compatibilitatea cu datele vechi.
+
+Important: numerele de registratura sunt generate de Supabase, nu de browser. Asta inseamna ca doi oameni pot apasa aproape in acelasi timp si tot nu primesc acelasi numar.
+
+## Partea E3 - Publici functia create-account
+
+Butonul **Admin > Conturi & acces > Creeaza cont** are nevoie de functia:
+
+`supabase/functions/create-account/index.ts`
+
+Pasii standard sunt:
+
+1. Instalezi Supabase CLI.
+2. Deschizi terminalul in folderul proiectului.
+3. Rulezi:
+
+```bash
+supabase login
+supabase link --project-ref rwrrtgnsslyquyjaakwb
+supabase functions deploy create-account --project-ref rwrrtgnsslyquyjaakwb
+```
+
+Dupa deploy, testezi din platforma:
+
+1. te loghezi cu `admin.meu`;
+2. mergi la **Admin > Conturi & acces**;
+3. apesi **Creeaza cont**;
+4. alegi rolul `Head`;
+5. salvezi;
+6. verifici in Supabase > Authentication > Users ca userul a aparut.
+
+Nu pune niciodata cheia `service_role` in `app.js`, `index.html` sau GitHub Pages. Ea trebuie sa ramana doar in Supabase / Edge Function.
+
 ## Partea F - Ce imi trimiti mie dupa ce faci GitHub + Supabase
 
 Trimite-mi:
